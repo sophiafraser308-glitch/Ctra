@@ -104,20 +104,27 @@ class AccountService:
             return False, "Authorization was not granted."
         try:
             tokens = await self.oauth.exchange_code(code)          # authorization code is single-use
-            accounts = await self.gateway.list_accounts_by_token(snapshot[2], tokens["access_token"])
         except Exception as exc:
             await self._fail_state(st, str(exc)[:300])
             return False, "Could not complete authorization. Check Telegram for details."
-        want_live = snapshot[2] == "LIVE"
-        usable = [a for a in accounts if a["is_live"] == want_live]
+        # tokens are valid now: persist them (encrypted) BEFORE talking to the broker so a transport
+        # problem never wastes the single-use code; the user can retry fetching accounts from Telegram.
+        usable: list[dict[str, Any]] | None = None
+        list_error: str | None = None
+        try:
+            accounts = await self.gateway.list_accounts_by_token(snapshot[2], tokens["access_token"])
+            usable = [a for a in accounts if a["is_live"] == (snapshot[2] == "LIVE")]
+        except Exception as exc:
+            list_error = str(exc)[:300]
+            log.error("account listing failed after OAuth: %s", list_error)
         async with self.db.session() as s:
             row = await s.get(OAuthState, st)
             row.status = "AUTHORIZED"
             row.tokens_enc = self.crypto.encrypt(json.dumps(tokens))
             row.accounts_json = usable
-            row.error = None
+            row.error = list_error
         await self.audit.record(action="ACCOUNT_OAUTH_AUTHORIZED", user_id=snapshot[0], target=st[:6],
-                                new_state={"accounts_found": len(usable), "environment": snapshot[2]})
+                                new_state={"accounts_found": len(usable) if usable is not None else None, "environment": snapshot[2]})
         if self.on_oauth_authorized:
             async with self.db.session() as s:
                 row = await s.get(OAuthState, st)
@@ -146,6 +153,21 @@ class AccountService:
         if row is None:
             raise NotFoundError("Authorization request not found")
         return row
+
+    async def fetch_accounts(self, state: str, user_id: int) -> OAuthState:
+        """Retry listing broker accounts for an already-authorised (tokens stored) request."""
+        row = await self.oauth_state(state)
+        if row.telegram_id != user_id:
+            raise SafetyError("This authorization belongs to another user")
+        if row.status != "AUTHORIZED" or not row.tokens_enc:
+            raise ConflictError("Authorization is not ready or was already used")
+        tokens = json.loads(self.crypto.decrypt(row.tokens_enc))
+        accounts = await self.gateway.list_accounts_by_token(row.environment, tokens["access_token"])
+        usable = [a for a in accounts if a["is_live"] == (row.environment == "LIVE")]
+        async with self.db.session() as s:
+            r = await s.get(OAuthState, state)
+            r.accounts_json, r.error = usable, None
+        return await self.oauth_state(state)
 
     async def pick_account(self, state: str, ctid: int, user_id: int) -> TradingAccount:
         """Finish onboarding: persist account + encrypted tokens, then connect."""

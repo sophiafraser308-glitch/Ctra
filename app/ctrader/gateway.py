@@ -80,7 +80,7 @@ class CTraderGateway:
         try:
             await asyncio.wait_for(mgr._ready.wait(), timeout)
         except asyncio.TimeoutError as exc:
-            raise CTraderNotConnected(f"{env} connection not ready: {mgr.last_error or mgr.state.value}") from exc
+            raise CTraderNotConnected(f"{env} connection not ready after {int(timeout)}s: state={mgr.state.value} host={mgr.host}:{mgr.port} last_error={mgr.last_error or 'none'}") from exc
         return mgr
 
     async def shutdown(self) -> None:

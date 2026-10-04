@@ -280,6 +280,10 @@ async def acc_add_env(cb: CallbackQuery, state: FSMContext, ctx: Any, role: Role
 
 async def notify_oauth_authorized(ctx: Any, row: Any) -> None:
     """Hook called by AccountService when the OAuth redirect finished: ask the user which account to add."""
+    if row.accounts_json is None:
+        await ctx.bot_api.send_message(row.chat_id, "✅ Authorization received, but fetching your accounts from cTrader failed:\n" + esc((row.error or "unknown")[:200]) + "\n\nThe authorization is saved — tap retry.",
+                                       parse_mode="HTML", reply_markup=kb([[btn("🔄 Fetch accounts", C("acc", "fa", row.state))], [btn("❌ Cancel", "home")]]))
+        return
     accounts = row.accounts_json or []
     if not accounts:
         await ctx.bot_api.send_message(row.chat_id, f"⚠️ Authorization succeeded but no {row.environment} accounts were found for this cTID.")
@@ -300,3 +304,22 @@ async def acc_pick_oauth(cb: CallbackQuery, ctx: Any, role: Role) -> None:
     await toast(cb, "Adding & connecting…")
     acc = await ctx.accounts.pick_account(state_token, int(ctid), cb.from_user.id)
     await show(cb, "✅ Account added.\n\n" + await _detail_text(ctx, acc), _detail_kb(acc))
+
+
+@router.callback_query(F.data.startswith("acc:fa:"))
+async def acc_fetch_accounts(cb: CallbackQuery, ctx: Any, role: Role) -> None:
+    need(role, Permission.ACCOUNT_MANAGE)
+    state_token = split(cb.data)[2]
+    await toast(cb, "Fetching accounts…")
+    try:
+        row = await ctx.accounts.fetch_accounts(state_token, cb.from_user.id)
+    except Exception as exc:
+        await show(cb, f"⚠️ Still failing: {esc(str(exc)[:200])}\nTry again in a moment.", kb([[btn("🔄 Fetch accounts", C("acc", "fa", state_token))], [btn("❌ Cancel", "home")]]))
+        return
+    accounts = row.accounts_json or []
+    if not accounts:
+        await show(cb, f"⚠️ No {row.environment} accounts found for this cTID.", kb([back_home("acc:menu")]))
+        return
+    rows = [[btn(f"{a['ctid']} · login {a.get('login') or '?'}", C("acc", "ap", row.state, a["ctid"]))] for a in accounts[:8]]
+    rows.append([btn("❌ Cancel", "home")])
+    await show(cb, f"✅ Select the {row.environment} account to add as <b>{esc(row.account_name)}</b>:", kb(rows))
