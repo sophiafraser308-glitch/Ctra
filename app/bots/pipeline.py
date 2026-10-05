@@ -48,7 +48,7 @@ class SignalPipeline:
                 continue
             try:
                 if sig.side == "CLOSE":
-                    n = await self.positions.close_by_bot_symbol(bot.id, sig.symbol, None)
+                    n = await self.positions.close_by_bot_symbol(bot.id, sig.symbol, None, sig.close_side)
                     await self._decide(sid, "APPROVED", "CLOSE_SIGNAL", {"closed": n})
                     out.append(sid)
                     continue

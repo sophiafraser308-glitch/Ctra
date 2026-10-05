@@ -13,7 +13,7 @@ from app.core.enums import Category, MarketDataStatus, Severity
 from app.core.exceptions import CTraderError
 from app.core.utils import utcnow
 from app.ctrader.gateway import CTraderGateway
-from app.ctrader.market_data import TF_SECONDS
+from app.core.timeframes import bucket_start_ms
 from app.ctrader.types import BarData, SymbolInfo, TickEvent
 from app.logging import get_logger
 from app.notifications.service import Notifier
@@ -88,7 +88,7 @@ class MarketDataService:
                 if not self.bars[key]:
                     try:
                         hist = await self.gateway.get_bars(account_id, info.symbol_id, tf, 200)
-                        bucket = int(time.time() * 1000) // (TF_SECONDS[tf] * 1000) * TF_SECONDS[tf] * 1000
+                        bucket = bucket_start_ms(tf, int(time.time() * 1000))
                         self.bars[key].extend(b for b in hist if b.ts_ms < bucket)
                     except CTraderError as exc:
                         log.warning("history backfill failed %s %s: %s", name, tf, str(exc)[:100])
@@ -130,8 +130,7 @@ class MarketDataService:
                     log.error("consumer tick error: %s", type(exc).__name__)
 
     def _update_bar(self, account_id: str, symbol_id: int, tf: str, price: float, now_ms: int) -> None:
-        span = TF_SECONDS[tf] * 1000
-        bucket = now_ms // span * span
+        bucket = bucket_start_ms(tf, now_ms)
         key = (account_id, symbol_id, tf)
         cur = self._building.get(key)
         if cur is None or cur.ts_ms != bucket:

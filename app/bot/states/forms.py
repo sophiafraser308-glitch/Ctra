@@ -19,13 +19,16 @@ class StrategyParam(StatesGroup):
 
 class NewBot(StatesGroup):
     name = State()
-    symbols = State()
-    timeframes = State()
 
 
 class EditBot(StatesGroup):
-    symbols = State()
-    timeframes = State()
+    param = State()
+
+
+class BacktestForm(StatesGroup):
+    date_from = State()
+    date_to = State()
+    option = State()
     param = State()
 
 

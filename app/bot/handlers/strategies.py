@@ -26,7 +26,7 @@ async def menu(cb: CallbackQuery, ctx: Any) -> None:
     rows = [[btn("⬆️ Upload strategy (.py)", "str:upload"), btn("📋 My strategies", "str:list:0")]]
     mb = [btn(t, C("str", "pick", m, 0)) for m, t in MODES]
     rows += [mb[i:i + 2] for i in range(0, len(mb), 2)]
-    rows.append([btn("🏠 Menu", "home")])
+    rows.append([btn("🧪 Backtest", "bt:menu"), btn("🏠 Menu", "home")])
     await show(cb, f"🧠 <b>Strategies</b> — {n} stored\nSandbox: <b>{ctx.settings.strategy_sandbox_mode}</b>", kb(rows))
     await toast(cb, "")
 

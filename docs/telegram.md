@@ -10,3 +10,6 @@ Main menu: Dashboard · Accounts · Trading Bots · Strategies · Positions · O
 * **FSM** (aiogram `MemoryStorage`): add account, rename, strategy upload/params, bot wizard & edits, risk edits, SL/TP/partial close, user management. FSM state is *not* durable; durable state is in the DB. `/cancel` aborts any flow.
 * **RBAC** per handler via `need(role, Permission)`; see `security.md`.
 * Errors are mapped to short user messages; unexpected errors show a reference id and are logged with traceback.
+
+* **Multi-select pickers** – symbols (broker-verified list: Gold, Oil, forex majors; select several) and timeframes (M1 → MN1; select several) in bot creation, bot settings and backtests.
+* **Backtest** – see `backtest.md`.

@@ -8,6 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from app.bot.callbacks.data import cb as C, split
+from app.bot.handlers.multiselect import register_flow, start_symbol_pick, start_tf_pick
 from app.bot.handlers.common import confirm_gate, env_tag, esc, fmt_ago, need, num, pnl, run_command, show, status_icon, toast
 from app.bot.keyboards.common import back_home, btn, kb, nav_row, paginate
 from app.bot.states.forms import EditBot, NewBot
@@ -150,34 +151,52 @@ async def bot_set(cb: CallbackQuery, ctx: Any) -> None:
     await toast(cb, "")
 
 
-@router.callback_query(F.data.startswith("bot:esym:") | F.data.startswith("bot:etf:") | F.data.startswith("bot:pe:"))
-async def bot_edit_start(cb: CallbackQuery, state: FSMContext, role: Role) -> None:
+@router.callback_query(F.data.startswith("bot:esym:"))
+async def bot_edit_symbols(cb: CallbackQuery, state: FSMContext, ctx: Any, role: Role) -> None:
     need(role, Permission.BOT_MANAGE)
-    parts = split(cb.data)
-    kind, bid = parts[1], parts[2]
-    await state.update_data(bid=bid, key=parts[3] if len(parts) > 3 else None)
-    await state.set_state({"esym": EditBot.symbols, "etf": EditBot.timeframes, "pe": EditBot.param}[kind])
-    prompt = {"esym": "Send symbols, comma separated (e.g. EURUSD,GBPUSD)", "etf": "Send timeframes, comma separated (M1,M5,M15,M30,H1,H4,D1)", "pe": f"Send the new value for <b>{esc(parts[3] if len(parts) > 3 else '')}</b>"}[kind]
-    await show(cb, prompt + "\n/cancel to abort.")
+    bid = split(cb.data)[2]
+    b = await ctx.bots.get(bid)
+    await state.update_data(bid=bid)
+    await start_symbol_pick(cb, state, ctx, b.account_id, b.symbols, "editbot_sym", f"Symbols for {b.name}")
     await toast(cb, "")
 
 
-@router.message(EditBot.symbols)
-async def edit_symbols(m: Message, state: FSMContext, ctx: Any, role: Role) -> None:
+@router.callback_query(F.data.startswith("bot:etf:"))
+async def bot_edit_tf(cb: CallbackQuery, state: FSMContext, ctx: Any, role: Role) -> None:
     need(role, Permission.BOT_MANAGE)
-    bid = (await state.get_data())["bid"]
-    await ctx.bots.update(bid, m.from_user.id, symbols=(m.text or "").replace(";", ",").split(","))
-    await state.clear()
-    await _view(m, ctx, bid)
+    bid = split(cb.data)[2]
+    b = await ctx.bots.get(bid)
+    await state.update_data(bid=bid)
+    await start_tf_pick(cb, state, b.timeframes, "editbot_tf", False, f"Timeframes for {b.name}")
+    await toast(cb, "")
 
 
-@router.message(EditBot.timeframes)
-async def edit_tf(m: Message, state: FSMContext, ctx: Any, role: Role) -> None:
+@router.callback_query(F.data.startswith("bot:pe:"))
+async def bot_param_start(cb: CallbackQuery, state: FSMContext, role: Role) -> None:
     need(role, Permission.BOT_MANAGE)
+    parts = split(cb.data)
+    await state.update_data(bid=parts[2], key=parts[3])
+    await state.set_state(EditBot.param)
+    await show(cb, f"Send the new value for <b>{esc(parts[3])}</b>\n/cancel to abort.")
+    await toast(cb, "")
+
+
+async def _edit_sym_done(cb: CallbackQuery, state: FSMContext, ctx: Any, sel: list[str]) -> None:
     bid = (await state.get_data())["bid"]
-    await ctx.bots.update(bid, m.from_user.id, timeframes=[t.strip() for t in (m.text or "").split(",") if t.strip()])
+    await ctx.bots.update(bid, cb.from_user.id, symbols=sel)
     await state.clear()
-    await _view(m, ctx, bid)
+    await _view(cb, ctx, bid)
+
+
+async def _edit_tf_done(cb: CallbackQuery, state: FSMContext, ctx: Any, sel: list[str]) -> None:
+    bid = (await state.get_data())["bid"]
+    await ctx.bots.update(bid, cb.from_user.id, timeframes=sel)
+    await state.clear()
+    await _view(cb, ctx, bid)
+
+
+register_flow("editbot_sym", _edit_sym_done)
+register_flow("editbot_tf", _edit_tf_done)
 
 
 @router.message(EditBot.param)
@@ -279,29 +298,26 @@ async def new_strategy(cb: CallbackQuery, state: FSMContext, ctx: Any) -> None:
     sid = split(cb.data)[2]
     st = await ctx.strategies.get(sid)
     ver = await ctx.strategies.get_version(st.active_version_id)
-    await state.update_data(strategy_id=sid)
-    await state.set_state(NewBot.symbols)
-    hint = ", ".join(ver.meta.get("symbols", [])) or "EURUSD"
-    await show(cb, f"Send the symbols to trade, comma separated.\nSuggested by strategy: <code>{esc(hint)}</code>")
+    d = await state.get_data()
+    await state.update_data(strategy_id=sid, hint_tf=ver.meta.get("timeframes", []))
+    await start_symbol_pick(cb, state, ctx, d["account_id"], ver.meta.get("symbols", []), "newbot_sym", "Symbols to trade")
     await toast(cb, "")
 
 
-@router.message(NewBot.symbols)
-async def new_symbols(m: Message, state: FSMContext) -> None:
-    syms = [s.strip().upper() for s in (m.text or "").replace(";", ",").split(",") if s.strip()]
-    if not syms:
-        raise ValidationFailed("Provide at least one symbol")
-    await state.update_data(symbols=syms)
-    await state.set_state(NewBot.timeframes)
-    await m.answer("Send timeframes, comma separated (M1,M5,M15,M30,H1,H4,D1), e.g. <code>M5</code>", parse_mode="HTML")
-
-
-@router.message(NewBot.timeframes)
-async def new_tf(m: Message, state: FSMContext, ctx: Any, role: Role) -> None:
-    need(role, Permission.BOT_MANAGE)
+async def _new_sym_done(cb: CallbackQuery, state: FSMContext, ctx: Any, sel: list[str]) -> None:
     d = await state.get_data()
-    tfs = [t.strip().upper() for t in (m.text or "").split(",") if t.strip()] or ["M5"]
-    bot = await ctx.bots.create(name=d["name"], account_id=d["account_id"], strategy_id=d["strategy_id"], version_id=None, symbols=d["symbols"],
-                                timeframes=tfs, parameters=None, risk_profile_id=None, user_id=m.from_user.id)
+    await start_tf_pick(cb, state, d.get("hint_tf", []), "newbot_tf", False, "Timeframes (the strategy runs on each)")
+
+
+async def _new_tf_done(cb: CallbackQuery, state: FSMContext, ctx: Any, sel: list[str]) -> None:
+    need_role = await ctx.users.role_of(cb.from_user.id)
+    need(need_role, Permission.BOT_MANAGE)
+    d = await state.get_data()
+    bot = await ctx.bots.create(name=d["name"], account_id=d["account_id"], strategy_id=d["strategy_id"], version_id=None,
+                                symbols=d["sym_sel"], timeframes=sel, parameters=None, risk_profile_id=None, user_id=cb.from_user.id)
     await state.clear()
-    await _view(m, ctx, bot.id)
+    await _view(cb, ctx, bot.id)
+
+
+register_flow("newbot_sym", _new_sym_done)
+register_flow("newbot_tf", _new_tf_done)

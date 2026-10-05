@@ -62,6 +62,12 @@ async def run() -> int:
 
     bot = Bot(settings.telegram_bot_token.get_secret_value(), default=DefaultBotProperties(parse_mode="HTML"))
     ctx.bot_api = bot
+    try:
+        from aiogram.types import BotCommand
+        await bot.set_my_commands([BotCommand(command="start", description="Main menu"), BotCommand(command="backtest", description="🧪 Backtest a strategy on past days"),
+                                   BotCommand(command="cancel", description="Cancel the current action")])
+    except Exception:
+        pass
     ctx.notifier.bot = bot
     from app.bot.router import build_dispatcher
     dp = build_dispatcher(ctx)

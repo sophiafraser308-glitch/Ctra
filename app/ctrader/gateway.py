@@ -360,13 +360,34 @@ class CTraderGateway:
                 pass
 
     async def get_bars(self, account_id: str, symbol_id: int, tf: str, count: int = 200) -> list[BarData]:
-        sess = self.session(account_id)
         now_ms = int(time.time() * 1000)
-        span = md_proto.TF_SECONDS[tf] * 1000 * int(count * 1.7 + 50)
-        from_ms = now_ms - min(span, 365 * 86_400_000)
-        res = await self._read(account_id, md_proto.build_trendbars_req(sess.ctid, symbol_id, tf, from_ms, now_ms), timeout=30)
-        bars = md_proto.parse_trendbars(res, tf)
+        span = md_proto.TF_SECONDS[tf] * 1000 * int(count * 1.9 + 60)
+        bars = await self.get_bars_range(account_id, symbol_id, tf, now_ms - span, now_ms)
         return bars[-count:]
+
+    async def get_bars_range(self, account_id: str, symbol_id: int, tf: str, from_ms: int, to_ms: int,
+                             progress: Callable[[int], None] | None = None) -> list[BarData]:
+        """Historical bars for [from_ms, to_ms], fetched in broker-friendly windows (cTrader limits the span per request)."""
+        from app.core.timeframes import TF_CHUNK_DAYS
+        sess = self.session(account_id)
+        window = TF_CHUNK_DAYS[tf] * 86_400_000
+        out: dict[int, BarData] = {}
+        cur = from_ms
+        while cur < to_ms:
+            end = min(cur + window, to_ms)
+            res = await self._read(account_id, md_proto.build_trendbars_req(sess.ctid, symbol_id, tf, cur, end), timeout=45)
+            batch = md_proto.parse_trendbars(res, tf)
+            for b in batch:
+                out[b.ts_ms] = b
+            if progress:
+                progress(len(out))
+            if md_proto.trendbars_has_more(res) and batch:
+                nxt = max(b.ts_ms for b in batch) + 1
+                cur = nxt if nxt > cur else end
+            else:
+                cur = end
+            await asyncio.sleep(0.22)         # broker allows ~5 historical requests / second
+        return [out[k] for k in sorted(out)]
 
     # ---- event dispatch ---------------------------------------------------------------------
     def _dispatch(self, env: str, msg: Any) -> None:

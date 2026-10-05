@@ -11,6 +11,8 @@ from app.config import Settings
 from app.ctrader.authentication import OAuthClient, TokenService
 from app.ctrader.gateway import CTraderGateway
 from app.database import Database
+from app.backtest.service import BacktestService
+from app.market_data.catalog import SymbolCatalog
 from app.market_data.service import MarketDataService
 from app.notifications.service import Notifier
 from app.orders.manager import OrderManager
@@ -46,6 +48,7 @@ class AppContext:
         self.tokens = TokenService(db, self.crypto, self.oauth, settings)
         self.gateway = CTraderGateway(settings, self.tokens)
         self.market = MarketDataService(settings, self.gateway, self.heartbeat, self.notifier)
+        self.catalog = SymbolCatalog(self.gateway)
         self.locks = LockService(db, self.audit, self.notifier)
         self.risk = RiskEngine(db, settings, self.sys_settings, self.locks, self.gateway, self.market)
         self.positions = PositionService(db, self.gateway, self.audit, self.notifier)
@@ -56,6 +59,7 @@ class AppContext:
         self.pipeline = SignalPipeline(db, self.gateway, self.risk, self.orders, self.positions, self.heartbeat)
         self.bots = BotManager(self)
         self.watchdog = WatchdogService(self)
+        self.backtests = BacktestService(self)
         self.dashboard = DashboardService(self)
         self.emergency = EmergencyService(self)
         # late binding of circular collaborators

@@ -22,3 +22,12 @@ Strategies → Upload → send `.py` as a document. The file is size-checked, de
 ## Lifecycle
 Validate (re-run checks) · Activate (previous active version becomes INACTIVE) · Deactivate · Rollback (activate an older version; audited) · Parameters (edit defaults per version; bots may override) · Statistics (trades, win rate, net P/L per version) · Delete (blocked while bots use it).
 Bots are **pinned** to a version; activating a new version does not silently change running bots – change it in Bot → Settings → Strategy version (bot must be stopped).
+
+## Sizing from a strategy
+`self.buy(symbol, sl_pips, tp_pips, comment, order_type, price, volume_lots)`: pass `volume_lots=0.10` for a **fixed size** (still rounded down to the symbol step and capped by the risk profile `max_position_lots`, exposure and margin limits), or `None` to let the Risk Engine size the trade from risk-per-trade and the SL distance. `self.close(symbol, comment, side="BUY"|"SELL")` closes only that direction.
+
+## Stochastic Cross (`strategies/stochastic_cross/strategy.py`)
+MT5-style stochastic (49/5/15, Close/Close, Linear Weight). BUY when the line crosses up through `buy_level` (10); SELL when it crosses down through `sell_level` (90). Every value is a parameter (Strategies → Parameters, or Bots → Settings per bot).
+
+## Timeframes
+All cTrader periods are supported: M1 M2 M3 M4 M5 M10 M15 M30 H1 H4 H12 D1 W1 MN1. Bots can run a strategy on several symbols and several timeframes at once (the hooks receive `symbol` and `timeframe`).

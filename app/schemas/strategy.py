@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 SEMVER = re.compile(r"^v?(\d{1,4})\.(\d{1,4})\.(\d{1,4})$")
 NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_\- ]{1,47}$")
-TIMEFRAMES = ("M1", "M5", "M15", "M30", "H1", "H4", "D1")
+from app.core.timeframes import TIMEFRAMES  # noqa: E402,F401
 
 
 class StrategyMetadata(BaseModel):

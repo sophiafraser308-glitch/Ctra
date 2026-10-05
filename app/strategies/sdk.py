@@ -39,21 +39,30 @@ class BaseStrategy:
     # ---- helpers ---------------------------------------------------------------
     @staticmethod
     def buy(symbol: str, stop_loss_pips: float | None = None, take_profit_pips: float | None = None,
-            comment: str | None = None, order_type: str = "MARKET", price: float | None = None) -> dict:
-        return _signal(symbol, "BUY", stop_loss_pips, take_profit_pips, comment, order_type, price)
+            comment: str | None = None, order_type: str = "MARKET", price: float | None = None,
+            volume_lots: float | None = None) -> dict:
+        """volume_lots=None -> the Risk Engine sizes the trade from risk-per-trade; a number -> fixed lots (still capped by risk limits)."""
+        return _signal(symbol, "BUY", stop_loss_pips, take_profit_pips, comment, order_type, price, volume_lots)
 
     @staticmethod
     def sell(symbol: str, stop_loss_pips: float | None = None, take_profit_pips: float | None = None,
-             comment: str | None = None, order_type: str = "MARKET", price: float | None = None) -> dict:
-        return _signal(symbol, "SELL", stop_loss_pips, take_profit_pips, comment, order_type, price)
+             comment: str | None = None, order_type: str = "MARKET", price: float | None = None,
+             volume_lots: float | None = None) -> dict:
+        return _signal(symbol, "SELL", stop_loss_pips, take_profit_pips, comment, order_type, price, volume_lots)
 
     @staticmethod
-    def close(symbol: str, comment: str | None = None) -> dict:
-        return _signal(symbol, "CLOSE", None, None, comment, "MARKET", None)
+    def close(symbol: str, comment: str | None = None, side: str | None = None) -> dict:
+        """Close this bot's positions on `symbol`; side='BUY'/'SELL' closes only that direction."""
+        d = _signal(symbol, "CLOSE", None, None, comment, "MARKET", None, None)
+        if side:
+            d["close_side"] = side
+        return d
 
 
-def _signal(symbol, side, sl, tp, comment, order_type, price) -> dict:
+def _signal(symbol, side, sl, tp, comment, order_type, price, volume_lots=None) -> dict:
     d: dict[str, Any] = {"symbol": symbol, "side": side, "order_type": order_type}
+    if volume_lots is not None:
+        d["volume_lots"] = float(volume_lots)
     if sl is not None:
         d["stop_loss_pips"] = float(sl)
     if tp is not None:

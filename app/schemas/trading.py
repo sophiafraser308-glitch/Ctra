@@ -13,6 +13,8 @@ class SignalIn(BaseModel):
     price: float | None = Field(default=None, gt=0)
     stop_loss_pips: float | None = Field(default=None, gt=0, le=100000)
     take_profit_pips: float | None = Field(default=None, gt=0, le=100000)
+    volume_lots: float | None = Field(default=None, gt=0, le=1000)   # optional fixed size requested by the strategy
+    close_side: Literal["BUY", "SELL"] | None = None                  # for CLOSE: only close this side
     confidence: float | None = Field(default=None, ge=0, le=1)
     comment: str | None = Field(default=None, max_length=64)
 

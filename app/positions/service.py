@@ -228,10 +228,10 @@ class PositionService:
                 log.error("close_all: failed %s: %s", pos.id, str(exc)[:120])
         return {"closed": ok, "failed": failed}
 
-    async def close_by_bot_symbol(self, bot_id: str, symbol: str, user_id: int | None = None) -> int:
+    async def close_by_bot_symbol(self, bot_id: str, symbol: str, user_id: int | None = None, side: str | None = None) -> int:
         n = 0
         for pos in await self.list_open():
-            if pos.bot_id == bot_id and pos.symbol.upper() == symbol.upper():
+            if pos.bot_id == bot_id and pos.symbol.upper() == symbol.upper() and (side is None or pos.side == side):
                 await self.close(pos.id, user_id, reason="strategy_close")
                 n += 1
         return n

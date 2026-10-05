@@ -6,8 +6,9 @@ from typing import Any
 from app.ctrader.pb import enum_name, has, opt, sdk
 from app.ctrader.types import PRICE_SCALE, BarData, TickEvent
 
-TF_TO_PERIOD = {"M1": "M1", "M5": "M5", "M15": "M15", "M30": "M30", "H1": "H1", "H4": "H4", "D1": "D1"}
-TF_SECONDS = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400, "D1": 86400}
+from app.core.timeframes import TF_ORDER, TF_SECONDS  # noqa: E402,F401
+
+TF_TO_PERIOD = {tf: tf for tf in TF_ORDER}   # enum names are identical (M1..M30, H1, H4, H12, D1, W1, MN1)
 
 
 def build_subscribe_spots(ctid: int, symbol_ids: list[int]):
@@ -41,6 +42,10 @@ def build_trendbars_req(ctid: int, symbol_id: int, tf: str, from_ms: int, to_ms:
     if count:
         r.count = count
     return r
+
+
+def trendbars_has_more(res: Any) -> bool:
+    return bool(opt(res, "hasMore", False))
 
 
 def parse_trendbars(res: Any, tf: str) -> list[BarData]:

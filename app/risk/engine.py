@@ -206,18 +206,31 @@ class RiskEngine:
         if st.consecutive_losses >= profile.max_consecutive_losses:
             return self._rej(RiskReason.CONSECUTIVE_LOSSES, losses=st.consecutive_losses)
         # 12. sizing
-        if not signal.stop_loss_pips:
-            if profile.require_stop_loss:
-                return self._rej(RiskReason.NO_STOP_LOSS)
-            return self._rej(RiskReason.NO_STOP_LOSS, why="cannot size position without a stop distance")
-        pv = await self.pip_value_per_lot(account, sym)
-        if pv is None:
-            return self._rej(RiskReason.NO_CONVERSION, deposit_currency=account.currency)
-        lots = compute_lots(balance=account.balance, risk_pct=profile.risk_per_trade_pct, sl_pips=signal.stop_loss_pips,
-                            pip_value_per_lot=pv, min_lots=sym.min_lots, step_lots=sym.step_lots,
-                            max_lots=min(profile.max_position_lots, sym.max_lots))
-        if lots <= 0:
-            return self._rej(RiskReason.MIN_VOLUME, pip_value=round(pv, 4), min_lots=sym.min_lots)
+        if profile.require_stop_loss and not signal.stop_loss_pips:
+            return self._rej(RiskReason.NO_STOP_LOSS)
+        pv: float | None = None
+        extra: dict[str, Any] = {}
+        if signal.volume_lots:
+            # strategy asked for a fixed size: honour it, but never beyond profile/symbol caps; round DOWN to the step
+            cap = min(profile.max_position_lots, sym.max_lots)
+            lots = min(signal.volume_lots, cap)
+            step = sym.step_lots or 0.01
+            lots = round(int(lots / step + 1e-9) * step, 8)
+            extra = {"mode": "fixed", "requested_lots": signal.volume_lots, "clamped_to_cap": signal.volume_lots > cap + 1e-9}
+            if lots < sym.min_lots - 1e-12:
+                return self._rej(RiskReason.MIN_VOLUME, requested=signal.volume_lots, min_lots=sym.min_lots)
+        else:
+            if not signal.stop_loss_pips:
+                return self._rej(RiskReason.NO_STOP_LOSS, why="cannot size position without a stop distance")
+            pv = await self.pip_value_per_lot(account, sym)
+            if pv is None:
+                return self._rej(RiskReason.NO_CONVERSION, deposit_currency=account.currency)
+            lots = compute_lots(balance=account.balance, risk_pct=profile.risk_per_trade_pct, sl_pips=signal.stop_loss_pips,
+                                pip_value_per_lot=pv, min_lots=sym.min_lots, step_lots=sym.step_lots,
+                                max_lots=min(profile.max_position_lots, sym.max_lots))
+            extra = {"mode": "risk"}
+            if lots <= 0:
+                return self._rej(RiskReason.MIN_VOLUME, pip_value=round(pv, 4), min_lots=sym.min_lots)
         # 13. exposure
         total = sum(p.volume_lots for p in pos) + pending_vol
         if total + lots > profile.max_total_exposure_lots + 1e-9:
@@ -236,5 +249,5 @@ class RiskEngine:
             if free_pct < profile.min_free_margin_pct:
                 return self._rej(RiskReason.FREE_MARGIN, free_pct=round(free_pct, 1), limit=profile.min_free_margin_pct)
         return RiskDecision(approved=True, reason=RiskReason.APPROVED.value, lots=lots,
-                            detail={"pip_value_per_lot": round(pv, 4), "risk_pct": profile.risk_per_trade_pct,
+                            detail={**extra, "pip_value_per_lot": round(pv, 4) if pv else None, "risk_pct": profile.risk_per_trade_pct,
                                     "spread_pips": None if spread is None else round(spread, 2)})

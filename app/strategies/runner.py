@@ -91,7 +91,7 @@ def _normalize(result):
     for s in list(result)[:20]:
         if not isinstance(s, dict):
             raise TypeError("each signal must be a dict")
-        out.append({k: s[k] for k in ("symbol", "side", "order_type", "price", "stop_loss_pips", "take_profit_pips", "confidence", "comment") if k in s})
+        out.append({k: s[k] for k in ("symbol", "side", "order_type", "price", "stop_loss_pips", "take_profit_pips", "confidence", "comment", "volume_lots", "close_side") if k in s})
     return out
 
 
@@ -143,6 +143,7 @@ def main():
     _send({"id": msg["id"], "ok": True, "result": "ready"})
 
     allowed_methods = {"on_start", "on_tick", "on_bar", "on_order_update", "on_position_update", "on_stop"}
+    hist = {}                                  # backtest only: (symbol, timeframe) -> closed bars kept inside the sandbox
     for line in PROTO_IN:
         line = line.strip()
         if not line:
@@ -152,6 +153,21 @@ def main():
             method, params = req["method"], req.get("params", {})
             if method == "ping":
                 _send({"id": req["id"], "ok": True, "result": "pong"})
+                continue
+            if method == "bt_chunk":
+                # backtest: items are [symbol, timeframe, bar, warmup_flag] in chronological order; history stays in this process
+                out, base = [], params.get("base", 0)
+                for k, it in enumerate(params["items"]):
+                    sym, tf, bar, warm = it
+                    h = hist.setdefault((sym, tf), [])
+                    if not warm:
+                        sg = _normalize(inst.on_bar(sym, tf, bar, h[-190:]))
+                        if sg:
+                            out.append({"i": base + k, "s": sg})
+                    h.append(bar)
+                    if len(h) > 600:
+                        del h[:200]
+                _send({"id": req["id"], "ok": True, "result": out})
                 continue
             if method not in allowed_methods:
                 raise ValueError("unknown method")
