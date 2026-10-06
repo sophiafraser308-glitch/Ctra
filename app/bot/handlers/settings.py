@@ -26,7 +26,7 @@ async def menu(cb: CallbackQuery, ctx: Any) -> None:
     gate = "on" if ctx.settings.live_trading_enabled else "OFF (env LIVE_TRADING_ENABLED=false)"
     await show(cb, f"⚙️ <b>Settings</b>\nLive trading: <b>{live}</b> (env gate {gate})\nNew trading disabled: <b>{'YES ⛔' if s.new_trading_disabled else 'no'}</b>\nEnvironment: {esc(ctx.settings.app_env)}",
                kb([[btn(("🟢 Disable LIVE trading" if s.live_allowed else "🔴 Enable LIVE trading"), "set:live")],
-                   [btn("👥 Users", "set:users"), btn("🧩 Configuration", "set:cfg")], [btn("🏠 Menu", "home")]]))
+                   [btn("👥 Users", "set:users"), btn("🧩 Configuration", "set:cfg")], [btn("📐 Points & decimals", "inst:menu")], [btn("🏠 Menu", "home")]]))
     await toast(cb, "")
 
 

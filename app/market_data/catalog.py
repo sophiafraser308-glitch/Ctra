@@ -16,7 +16,7 @@ CATEGORY_ORDER = ("GOLD", "OIL", "FOREX")
 CATEGORY_LABEL = {"GOLD": "🥇 Gold", "OIL": "🛢 Oil", "FOREX": "💱 Forex majors"}
 # fallback names when the account is offline (unverified!)
 FALLBACK = ["XAUUSD", "XTIUSD", "XBRUSD", *FOREX_MAJORS]
-AUTO_SPREAD_PIPS = {"GOLD": 25.0, "OIL": 4.0, "FOREX": 1.2}     # backtest defaults (pips as cTrader defines them)
+AUTO_SPREAD_PIPS = {"GOLD": 2.5, "OIL": 4.0, "FOREX": 1.2}      # backtest defaults in POINTS (gold 2.5 pts = $0.25)
 
 
 @dataclass(frozen=True)

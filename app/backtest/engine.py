@@ -44,6 +44,7 @@ class SymbolSpec:
     quote_ccy: str = ""
     conv: ConvSeries | None = None        # quote -> deposit currency; None = same currency (rate 1)
     conv_missing: bool = False
+    display_decimals: int = 5
 
     def rate(self, ts: int) -> float:
         return self.conv.at(ts) if self.conv else 1.0
@@ -52,9 +53,12 @@ class SymbolSpec:
 @dataclass
 class BtConfig:
     initial_balance: float = 10_000.0
-    commission_per_lot: float = 0.0       # deposit currency, charged once per round turn per lot
-    risk_pct: float = 1.0                 # used when the strategy does not send volume_lots
-    max_open_positions: int = 10
+    commission_per_lot: float = 0.0       # internal (not exposed in the UI)
+    lot_override: float = 0.0             # >0: every trade uses this lot size; 0 = the strategy's volume_lots
+    default_lots: float = 0.10            # used when neither the override nor the strategy gives a size
+    sl_override: float = 0.0              # points; >0 replaces the strategy's stop loss
+    tp_override: float = 0.0              # points; >0 replaces the strategy's take profit
+    max_open_positions: int = 100
     max_lots: float = 100.0
     daily_loss_limit: float = 0.0         # deposit currency, 0 = off (worst intrabar floating counts)
     daily_profit_target: float = 0.0      # deposit currency, 0 = off
@@ -173,18 +177,10 @@ class BacktestEngine:
         return total
 
     # ---- sizing ------------------------------------------------------------------------------------
-    def _size(self, spec: SymbolSpec, ts: int, sl_pips: float | None, req: float | None) -> tuple[float | None, str]:
+    def _size(self, spec: SymbolSpec, ts: int, req: float | None) -> tuple[float | None, str]:
         step = spec.step_lots or 0.01
-        if req:
-            lots = min(req, self.cfg.max_lots, spec.max_lots)
-        else:
-            if not sl_pips:
-                return None, "NO_STOP_LOSS_FOR_RISK_SIZING"
-            pv = spec.lot_units * spec.pip_size * spec.rate(ts)
-            if pv <= 0:
-                return None, "NO_PIP_VALUE"
-            lots = (self.balance * self.cfg.risk_pct / 100.0) / (sl_pips * pv)
-            lots = min(lots, self.cfg.max_lots, spec.max_lots)
+        lots = self.cfg.lot_override or req or self.cfg.default_lots
+        lots = min(lots, self.cfg.max_lots, spec.max_lots)
         lots = round(math.floor(lots / step + 1e-9) * step, 8)
         if lots < spec.min_lots - 1e-12:
             return None, "BELOW_MIN_LOTS"
@@ -199,9 +195,9 @@ class BacktestEngine:
             return self._skip(ts, spec.name, p["side"], "DAY_STOPPED (daily limit reached)")
         if len(self.open) >= self.cfg.max_open_positions:
             return self._skip(ts, spec.name, p["side"], "MAX_OPEN_POSITIONS")
-        sl_pips = p.get("sl_pips") or None
-        tp_pips = p.get("tp_pips") or None
-        lots, why = self._size(spec, ts, sl_pips, p.get("lots"))
+        sl_pips = self.cfg.sl_override or p.get("sl_pips") or None
+        tp_pips = self.cfg.tp_override or p.get("tp_pips") or None
+        lots, why = self._size(spec, ts, p.get("lots"))
         if lots is None:
             return self._skip(ts, spec.name, p["side"], why)
         spread = self._spread(spec)

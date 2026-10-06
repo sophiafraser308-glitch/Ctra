@@ -239,6 +239,9 @@ class CTraderGateway:
         mgr = self.managers[sess.environment]
         res = await mgr.request(acc_proto.build_symbols_list_req(sess.ctid), timeout=30)
         infos = acc_proto.parse_light_symbols(res)
+        from app.market_data.instruments import apply_to_symbol
+        for i in infos:
+            apply_to_symbol(i)               # gold 0.1/point, oil 0.01, forex pip — consistent for live orders, risk and backtests
         sess.symbols_by_id = {i.symbol_id: i for i in infos}
         sess.symbols_by_name = {_norm(i.name): i for i in infos}
         ares = await mgr.request(acc_proto.build_assets_req(sess.ctid), timeout=20)

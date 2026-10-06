@@ -63,16 +63,27 @@ def test_signal_close_and_end_of_test_close():
     assert [t.reason for t in r.trades] == ["SIGNAL_CLOSE", "END_OF_TEST"]
 
 
-def test_risk_sizing_and_min_lots_skip():
-    e = engine(initial_balance=10_000, risk_pct=1.0)
-    sig = {"side": "BUY", "order_type": "MARKET", "stop_loss_pips": 20}          # no volume -> risk sizing
-    e.feed(*bar(0, 1.1, 1.1, 1.1, 1.1), [sig])
+def test_overrides_for_lots_sl_tp():
+    e = engine(lot_override=0.5, sl_override=20, tp_override=40)
+    e.feed(*bar(0, 1.1, 1.1, 1.1, 1.1), [{"side": "BUY", "order_type": "MARKET", "stop_loss_pips": 5, "take_profit_pips": 5, "volume_lots": 3.0}])
     e.feed(*bar(1, 1.1, 1.1, 1.1, 1.1), [])
-    assert abs(e.open[0].lots - 0.5) < 1e-9                                      # $100 / (20 pips * $10)
-    e2 = engine(initial_balance=10_000)
-    e2.feed(*bar(0, 1.1, 1.1, 1.1, 1.1), [{"side": "BUY", "order_type": "MARKET"}])
+    p = e.open[0]
+    assert abs(p.lots - 0.5) < 1e-9 and p.sl_pips == 20 and p.tp_pips == 40
+    e2 = engine()                                                           # no override, no volume -> default 0.10
+    e2.feed(*bar(0, 1.1, 1.1, 1.1, 1.1), [{"side": "BUY", "order_type": "MARKET", "stop_loss_pips": 5}])
     e2.feed(*bar(1, 1.1, 1.1, 1.1, 1.1), [])
-    assert e2.skipped and e2.skipped[0]["reason"] == "NO_STOP_LOSS_FOR_RISK_SIZING"
+    assert abs(e2.open[0].lots - 0.10) < 1e-9
+
+
+def test_gold_points_definition():
+    # gold: 1 point = 0.1, 100 oz lot -> $10 per point per lot; 4150 -> 4152 = 20 points = $200 per lot
+    gold = SymbolSpec("XAUUSD", 0.1, 100, 2, spread_pips=0.0)
+    e = BacktestEngine(BtConfig(tf_ms=TF, tz_offset_hours=0), {"XAUUSD": gold})
+    sig = {"side": "BUY", "order_type": "MARKET", "stop_loss_pips": 20, "take_profit_pips": 20, "volume_lots": 1.0}
+    e.feed(0, "XAUUSD", {"t": 0, "o": 4150.0, "h": 4150.0, "l": 4150.0, "c": 4150.0, "v": 1}, [sig])
+    e.feed(TF, "XAUUSD", {"t": TF, "o": 4150.0, "h": 4152.5, "l": 4149.9, "c": 4152.0, "v": 1}, [])
+    t = e.finish().trades[0]
+    assert t.reason == "TP" and abs(t.exit_price - 4152.0) < 1e-9 and abs(t.pips - 20) < 1e-6 and abs(t.net - 200.0) < 1e-6
 
 
 def test_quote_conversion_series():

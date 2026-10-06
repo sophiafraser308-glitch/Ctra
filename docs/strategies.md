@@ -31,3 +31,6 @@ MT5-style stochastic (49/5/15, Close/Close, Linear Weight). BUY when the line cr
 
 ## Timeframes
 All cTrader periods are supported: M1 M2 M3 M4 M5 M10 M15 M30 H1 H4 H12 D1 W1 MN1. Bots can run a strategy on several symbols and several timeframes at once (the hooks receive `symbol` and `timeframe`).
+
+## Units
+`stop_loss_pips` / `take_profit_pips` and every spread value are in **points** as defined in `instruments.md` (gold: 1 point = 0.1; forex: 1 pip).

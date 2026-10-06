@@ -21,10 +21,18 @@ class SymbolInfo:
     base_asset_id: int | None = None
     quote_asset_id: int | None = None
     detailed: bool = False
+    point_size: float | None = None          # operator definition (see market_data/instruments.py); overrides the broker pip
+    display_decimals: int | None = None
 
     @property
     def pip_size(self) -> float:
-        return 10 ** (-self.pip_position)
+        """One "point": operator-defined when known (gold 0.1, oil 0.01, forex pip), otherwise the broker's pip."""
+        return self.point_size if self.point_size else 10 ** (-self.pip_position)
+
+    def fmt_price(self, p: float | None) -> str:
+        if p is None:
+            return "—"
+        return f"{p:.{self.display_decimals if self.display_decimals is not None else self.digits}f}"
 
     def lots_to_protocol(self, lots: float) -> int:
         raw = int(round(lots * self.lot_size))
