@@ -120,7 +120,7 @@ class OrderManager:
                       strategy_id=intent.strategy_id, strategy_version_id=intent.strategy_version_id, signal_id=intent.signal_id,
                       symbol=intent.symbol, side=intent.side, order_type=intent.order_type, volume_lots=intent.volume_lots,
                       price=intent.price, stop_loss_pips=intent.stop_loss_pips, take_profit_pips=intent.take_profit_pips,
-                      status=OrderStatus.PENDING.value, retry_of=intent.retry_of, extra={"comment": intent.comment})
+                      status=OrderStatus.PENDING.value, retry_of=intent.retry_of, extra={"comment": intent.comment, "timeframe": intent.timeframe})
         try:
             async with self.db.session() as s:
                 s.add(order)
@@ -245,7 +245,11 @@ class OrderManager:
                                         previous_state={"status": prev}, new_state={"status": order.status, "broker_order": order.broker_order_id, "position": order.broker_position_id, "price": order.avg_fill_price})
                 log.notice("order %s %s -> %s", order.id, prev, order.status, ctx={"order": order.id, "corr": order.correlation_id})
                 if order.status == "FILLED":
-                    await self.notifier.notify("ORDER_FILLED", f"✅ {order.symbol} {order.side} {order.volume_lots:g} lots filled @ {order.avg_fill_price}", Severity.INFO, dedup_key=f"fill:{order.id}", throttle_seconds=0)
+                    tf = (order.extra or {}).get("timeframe")
+                    lv = " · ".join(x for x in (f"SL {order.stop_loss_pips:g}" if order.stop_loss_pips else "", f"TP {order.take_profit_pips:g}" if order.take_profit_pips else "") if x)
+                    await self.notifier.notify("ORDER_FILLED", f"✅ {order.symbol} {order.side} {order.volume_lots:g} lots filled @ {order.avg_fill_price}"
+                                               + (f"\n⏱ Timeframe: {tf}" if tf else "") + (f"\n🎚 {lv} pts" if lv else ""),
+                                               Severity.INFO, dedup_key=f"fill:{order.id}", throttle_seconds=0)
                     if order.bot_id:
                         async with self.db.session() as s:
                             b = await s.get(Bot, order.bot_id)
@@ -304,7 +308,8 @@ class OrderManager:
                                             account_id=o.account_id, symbol=o.symbol, side=o.side, order_type=o.order_type,
                                             volume_lots=dec.lots, price=o.price, stop_loss_pips=o.stop_loss_pips,
                                             take_profit_pips=o.take_profit_pips, bot_id=o.bot_id, strategy_id=o.strategy_id,
-                                            strategy_version_id=o.strategy_version_id, signal_id=o.signal_id, retry_of=o.id))
+                                            strategy_version_id=o.strategy_version_id, signal_id=o.signal_id, retry_of=o.id,
+                                            timeframe=(o.extra or {}).get("timeframe")))
         await self._update(o.id, extra={**(o.extra or {}), "retry_allowed": False, "retried_as": new.id})
         await self.audit.record(action="ORDER_RETRY", user_id=user_id, target=o.id, new_state={"new_order": new.id})
         return new

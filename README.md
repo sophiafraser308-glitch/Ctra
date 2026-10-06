@@ -24,3 +24,7 @@ architecture · installation · configuration · telegram · ctrader · authenti
 
 ## Verification status
 Written without network access: code compiles and the offline-testable parts are verified, but Telegram, cTrader, PostgreSQL, Twisted-on-asyncio and cloud deployment were **not** runtime-tested. See `docs/troubleshooting.md` ("What was NOT runtime-verified") and run `pytest` + a DEMO session first. Trading involves risk; no profitability is implied.
+
+
+## Trade settings (lot · TP · SL per timeframe)
+Controlled from Telegram for live, demo and backtest: `/set tp 15m 150`, `/set sl 15m 90`, `/set lot 0.1`, `/tpsl`. See [docs/trade_settings.md](docs/trade_settings.md).

@@ -14,6 +14,7 @@ from app.backtest.report import build_csv, build_summary_text, build_xlsx
 from app.core.enums import Category
 from app.core.exceptions import PlatformError, ValidationFailed
 from app.core.timeframes import TF_SECONDS
+from app.core.trade_settings import backtest_levels
 from app.core.utils import utcnow
 from app.logging import get_logger
 from app.market_data.catalog import AUTO_SPREAD_PIPS, classify
@@ -173,7 +174,8 @@ class BacktestService:
             meta = {"strategy": st.name, "version": ver.version, "account": f"{acc.name} ({acc.environment})", "symbols": req.symbols,
                     "timeframes": tfs, "date_from": self._d(req.date_from_ms, tzs), "date_to": self._d(req.date_to_ms - 1, tzs),
                     "tz_label": f"UTC{tz:+g}", "bars": total_bars, "seconds": seconds, "params": params, "spreads": spreads,
-                    "options": o, "points": points, "display_decimals": display_dec}
+                    "options": o, "points": points, "display_decimals": display_dec,
+                    "levels": {tf: backtest_levels(ctx.trade_settings.get(), tf, float(o["sl_points"]), float(o["tp_points"]), float(o["lot_size"])) for tf in tfs}}
             await status("📝 Building reports…")
             want = o["output"]
             xlsx = await asyncio.to_thread(build_xlsx, results, meta) if want in ("both", "xlsx") else None
@@ -231,8 +233,10 @@ class BacktestService:
         if len(items) > MAX_BARS and tf not in ("D1", "W1", "MN1"):
             raise ValidationFailed(f"{tf}: too many bars ({len(items):,}); shorten the period")
         timeline = warm_items + items
-        cfg = BtConfig(initial_balance=float(o["initial_balance"]), lot_override=float(o["lot_size"]), sl_override=float(o["sl_points"]),
-                       tp_override=float(o["tp_points"]), tz_offset_hours=float(o["tz_offset"]), tf_ms=tf_ms, deposit_ccy=deposit)
+        # lot / SL / TP of THIS timeframe come from the Telegram trade settings (same profile the live bots use)
+        lv = backtest_levels(ctx.trade_settings.get(), tf, float(o["sl_points"]), float(o["tp_points"]), float(o["lot_size"]))
+        cfg = BtConfig(initial_balance=float(o["initial_balance"]), lot_override=lv["lot"], sl_override=lv["sl"], tp_override=lv["tp"],
+                       sl_forced=True, tp_forced=True, tz_offset_hours=float(o["tz_offset"]), tf_ms=tf_ms, deposit_ccy=deposit)
         engine = BacktestEngine(cfg, specs)
         host = StrategyHost(ctx.settings, f"backtest:{st.name}:{tf}", source, ver.meta["class_name"], params,
                             {"symbols": req.symbols, "timeframes": [tf], "environment": "BACKTEST", "bot_id": "backtest"})

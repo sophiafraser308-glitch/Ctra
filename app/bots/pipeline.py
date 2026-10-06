@@ -17,8 +17,9 @@ log = get_logger(Category.SIGNAL)
 
 
 class SignalPipeline:
-    def __init__(self, db: Database, gateway: Any, risk: Any, orders: Any, positions: Any, hb: Any) -> None:
+    def __init__(self, db: Database, gateway: Any, risk: Any, orders: Any, positions: Any, hb: Any, trade_settings: Any = None) -> None:
         self.db, self.gateway, self.risk, self.orders, self.positions, self.hb = db, gateway, risk, orders, positions, hb
+        self.trade_settings = trade_settings      # TradeSettingsService (lot / SL / TP per timeframe, controlled from Telegram)
 
     async def process(self, bot: Bot, raw_signals: list[dict[str, Any]]) -> list[str]:
         out: list[str] = []
@@ -29,6 +30,11 @@ class SignalPipeline:
             except ValidationError as exc:
                 await self._store_invalid(bot, raw, corr, str(exc)[:300])
                 continue
+            ts_cfg = self.trade_settings.get() if self.trade_settings is not None else None
+            if ts_cfg is not None and sig.side in ("BUY", "SELL"):
+                # lot / SL / TP come from the Telegram trade settings (per timeframe), not from the strategy code
+                eff = self.trade_settings.effective(sig.timeframe)
+                sig = sig.model_copy(update={"stop_loss_pips": eff["sl"], "take_profit_pips": eff["tp"], "volume_lots": eff["lot"]})
             self.hb.update(f"bot:{bot.id}", signal=True)
             async with self.db.session() as s:
                 row = Signal(correlation_id=corr, bot_id=bot.id, account_id=bot.account_id, strategy_id=bot.strategy_id,
@@ -48,8 +54,10 @@ class SignalPipeline:
                 continue
             try:
                 if sig.side == "CLOSE":
-                    n = await self.positions.close_by_bot_symbol(bot.id, sig.symbol, None, sig.close_side)
-                    await self._decide(sid, "APPROVED", "CLOSE_SIGNAL", {"closed": n})
+                    # one-trade-per-timeframe mode: a CLOSE coming from M15 closes only the trades M15 opened
+                    only_tf = sig.timeframe if (ts_cfg is not None and ts_cfg.get("multi_tf")) else None
+                    n = await self.positions.close_by_bot_symbol(bot.id, sig.symbol, None, sig.close_side, only_tf)
+                    await self._decide(sid, "APPROVED", "CLOSE_SIGNAL", {"closed": n, "timeframe": only_tf})
                     out.append(sid)
                     continue
                 sym = await self.gateway.get_symbol(acc.id, sig.symbol)
@@ -64,7 +72,8 @@ class SignalPipeline:
             intent = OrderIntent(request_id=f"sig-{sid}", correlation_id=corr, account_id=acc.id, symbol=sig.symbol, side=sig.side,
                                  order_type=sig.order_type, volume_lots=dec.lots, price=sig.price, stop_loss_pips=sig.stop_loss_pips,
                                  take_profit_pips=sig.take_profit_pips, bot_id=bot.id, strategy_id=bot.strategy_id,
-                                 strategy_version_id=bot.strategy_version_id, signal_id=sid, comment=f"{(bot.name or 'bot')[:20]}|{sig.comment or ''}"[:60])
+                                 strategy_version_id=bot.strategy_version_id, signal_id=sid, timeframe=sig.timeframe,
+                                 comment=f"{(bot.name or 'bot')[:20]}|{sig.timeframe or ''}|{sig.comment or ''}"[:60])
             try:
                 order = await self.orders.submit(intent)
                 async with self.db.session() as s:

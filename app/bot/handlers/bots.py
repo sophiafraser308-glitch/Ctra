@@ -121,7 +121,7 @@ async def bot_sigs(cb: CallbackQuery, ctx: Any) -> None:
     async with ctx.db.session() as s:
         rows = list((await s.execute(select(Signal).where(Signal.bot_id == bid).order_by(Signal.created_at.desc()).limit(60))).scalars())
     items, page, pages = paginate(rows, int(page), 8)
-    text = "📜 <b>Recent signals</b>\n" + ("\n".join(f"{'✅' if x.risk_decision == 'APPROVED' else '⛔'} {x.side} {x.symbol} · {esc(x.risk_reason or '?')} · {fmt_ago(x.created_at)}" for x in items) or "None")
+    text = "📜 <b>Recent signals</b>\n" + ("\n".join(f"{'✅' if x.risk_decision == 'APPROVED' else '⛔'} {x.side} {x.symbol}{' [' + str((x.payload or {}).get('timeframe')) + ']' if (x.payload or {}).get('timeframe') else ''} · {esc(x.risk_reason or '?')} · {fmt_ago(x.created_at)}" for x in items) or "None")
     nav = nav_row(f"bot:sigs:{bid}", page, pages)
     await show(cb, text, kb([nav, back_home(C("bot", "view", bid))]))
     await toast(cb, "")

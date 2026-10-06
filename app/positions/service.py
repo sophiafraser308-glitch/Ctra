@@ -158,12 +158,14 @@ class PositionService:
                     pos.status, pos.closed_at, pos.unrealized_pnl, pos.volume_lots = "CLOSED", utcnow(), 0.0, pos.volume_lots
                 else:
                     pos.volume_lots = remaining
-            tid, symname = trade.id, trade.symbol
+            tid, symname, tside, tlots = trade.id, trade.symbol, trade.side, trade.volume_lots
+            order_id = pos.order_id if pos else None
         await self.audit.record(action="TRADE_CLOSED", target=tid, new_state={"symbol": symname, "net_pnl": net, "deal": deal.deal_id})
         if self.risk:
             await self.risk.on_trade_closed(account_id, net)
-        await self.notifier.notify("TRADE_CLOSED", f"Trade closed {symname}: net {net:+.2f}", Severity.INFO if net >= 0 else Severity.NOTICE,
-                                   dedup_key=f"trade:{tid}", throttle_seconds=0)
+        tf = await self.timeframe_of(order_id)
+        await self.notifier.notify("TRADE_CLOSED", f"Trade closed {symname} {tside} {tlots:g} lots: net {net:+.2f}" + (f"\n⏱ Timeframe: {tf}" if tf else ""),
+                                   Severity.INFO if net >= 0 else Severity.NOTICE, dedup_key=f"trade:{tid}", throttle_seconds=0)
         if pos is not None:
             await self._emit(account_id, "CLOSED", pos)
         return trade
@@ -228,10 +230,24 @@ class PositionService:
                 log.error("close_all: failed %s: %s", pos.id, str(exc)[:120])
         return {"closed": ok, "failed": failed}
 
-    async def close_by_bot_symbol(self, bot_id: str, symbol: str, user_id: int | None = None, side: str | None = None) -> int:
+    async def timeframe_of(self, order_id: str | None) -> str | None:
+        """Timeframe whose signal opened this position (stored on the order); None for external / pre-upgrade positions."""
+        if not order_id:
+            return None
+        async with self.db.session() as s:
+            o = await s.get(Order, order_id)
+        return ((o.extra or {}).get("timeframe") if o else None) or None
+
+    async def close_by_bot_symbol(self, bot_id: str, symbol: str, user_id: int | None = None, side: str | None = None,
+                                  timeframe: str | None = None) -> int:
+        """timeframe=None closes across all timeframes; otherwise only trades opened by that timeframe (unknown-timeframe trades are included)."""
         n = 0
         for pos in await self.list_open():
             if pos.bot_id == bot_id and pos.symbol.upper() == symbol.upper() and (side is None or pos.side == side):
+                if timeframe:
+                    ptf = await self.timeframe_of(pos.order_id)
+                    if ptf and ptf != timeframe:
+                        continue
                 await self.close(pos.id, user_id, reason="strategy_close")
                 n += 1
         return n

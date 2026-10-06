@@ -58,6 +58,8 @@ class BtConfig:
     default_lots: float = 0.10            # used when neither the override nor the strategy gives a size
     sl_override: float = 0.0              # points; >0 replaces the strategy's stop loss
     tp_override: float = 0.0              # points; >0 replaces the strategy's take profit
+    sl_forced: bool = False               # True: sl_override is final even when 0 (= no stop loss); the strategy's value is ignored
+    tp_forced: bool = False               # same for take profit
     max_open_positions: int = 100
     max_lots: float = 100.0
     daily_loss_limit: float = 0.0         # deposit currency, 0 = off (worst intrabar floating counts)
@@ -195,8 +197,8 @@ class BacktestEngine:
             return self._skip(ts, spec.name, p["side"], "DAY_STOPPED (daily limit reached)")
         if len(self.open) >= self.cfg.max_open_positions:
             return self._skip(ts, spec.name, p["side"], "MAX_OPEN_POSITIONS")
-        sl_pips = self.cfg.sl_override or p.get("sl_pips") or None
-        tp_pips = self.cfg.tp_override or p.get("tp_pips") or None
+        sl_pips = (self.cfg.sl_override or None) if self.cfg.sl_forced else (self.cfg.sl_override or p.get("sl_pips") or None)
+        tp_pips = (self.cfg.tp_override or None) if self.cfg.tp_forced else (self.cfg.tp_override or p.get("tp_pips") or None)
         lots, why = self._size(spec, ts, p.get("lots"))
         if lots is None:
             return self._skip(ts, spec.name, p["side"], why)

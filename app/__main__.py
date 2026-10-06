@@ -66,6 +66,8 @@ async def run() -> int:
         from aiogram.types import BotCommand
         await bot.set_my_commands([BotCommand(command="start", description="Main menu"), BotCommand(command="backtest", description="🧪 Backtest a strategy on past days"),
                                    BotCommand(command="points", description="📐 Points, decimals & point value per symbol"),
+                                   BotCommand(command="tpsl", description="🎚 Lot / TP / SL per timeframe (panel)"),
+                                   BotCommand(command="set", description="🎚 /set tp 15m 150 · /set sl 15m 90 · /set lot 0.1"),
                                    BotCommand(command="cancel", description="Cancel the current action")])
     except Exception:
         pass

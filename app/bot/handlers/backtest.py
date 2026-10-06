@@ -19,6 +19,7 @@ from app.bot.handlers.multiselect import register_flow, start_symbol_pick, start
 from app.bot.keyboards.common import back_home, btn, kb
 from app.bot.states.forms import BacktestForm
 from app.core.enums import Role
+from app.core.trade_settings import backtest_levels
 from app.core.exceptions import ValidationFailed
 from app.security.rbac import Permission
 
@@ -27,9 +28,9 @@ router = Router(name="backtest")
 # key -> (button label, prompt, type, min, max)
 OPTS: dict[str, tuple[str, str, type, float, float]] = {
     "initial_balance": ("💰 Balance", "Initial balance", float, 100, 10_000_000),
-    "lot_size": ("📦 Lot size", "Lot size for every trade (0 = use the strategy's own lots)", float, 0, 1000),
-    "sl_points": ("🛑 Stop loss", "Stop loss in POINTS (0 = use the strategy's). Gold: 1 point = 0.1 → 4150→4152 = 20 points", float, 0, 100_000),
-    "tp_points": ("🎯 Take profit", "Take profit TARGET in POINTS (0 = use the strategy's). Gold: 1 point = 0.1", float, 0, 100_000),
+    "lot_size": ("📦 Lot size", "Lot size for every trade of this run (0 = use the Trade settings: /set lot)", float, 0, 1000),
+    "sl_points": ("🛑 Stop loss", "Stop loss in POINTS for this run (0 = use the Trade settings: /set sl 15m 90). A timeframe's own value wins. Gold: 1 point = 0.1", float, 0, 100_000),
+    "tp_points": ("🎯 Take profit", "Take profit in POINTS for this run (0 = use the Trade settings: /set tp 15m 150). A timeframe's own value wins. Gold: 1 point = 0.1", float, 0, 100_000),
     "tz_offset": ("🕒 Timezone", "Timezone offset in hours for reports and the day boundary (Damascus = 3)", float, -12, 14),
 }
 AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
@@ -311,13 +312,19 @@ async def _options(event: Any, ctx: Any, state: FSMContext) -> None:
     o = bt["opts"]
     st = await ctx.strategies.get(bt["strategy_id"])
     acc = await ctx.accounts.get(bt["account_id"])
-    z = lambda v: "strategy's" if not v else v          # noqa: E731
+    z = lambda v: "from Trade settings" if not v else v          # noqa: E731
     lines = ["🧪 <b>Backtest setup</b>", f"Strategy: <b>{esc(st.name)}</b>", f"History from: {esc(acc.name)} ({acc.environment})",
              f"Symbols: <b>{esc(', '.join(bt['symbols']))}</b>", f"Timeframes: <b>{', '.join(bt['timeframes'])}</b>",
              f"Days: <b>{bt['date_from']} → {bt['date_to']}</b>", "",
              f"• Balance: <b>{o['initial_balance']:g}</b>", f"• Lot size: <b>{z(o['lot_size'])}</b>",
              f"• Stop loss (points): <b>{z(o['sl_points'])}</b>", f"• Take profit target (points): <b>{z(o['tp_points'])}</b>",
              f"• Spread: <b>{o['spread']}</b> (auto: gold 2.5 pts, oil 4, forex 1.2)", f"• Timezone: <b>UTC{o['tz_offset']:+g}</b>", f"• Output: <b>{o['output']}</b>"]
+    ts_now = ctx.trade_settings.get()
+    g = lambda v: f"{v:g}" if v else "—"                    # noqa: E731
+    lines.append("• Used per timeframe (lot · TP · SL, points):")
+    for tf in bt["timeframes"]:
+        lv = backtest_levels(ts_now, tf, o["sl_points"], o["tp_points"], o["lot_size"])
+        lines.append(f"   {tf}: {g(lv['lot'] or 0.10)} · TP {g(lv['tp'])} · SL {g(lv['sl'])}")
     if bt["params"]:
         lines.append(f"• Strategy overrides: <code>{esc(str(bt['params']))}</code>")
     rows = [[btn(OPTS["initial_balance"][0], C("bt", "o", "initial_balance")), btn(OPTS["lot_size"][0], C("bt", "o", "lot_size"))],
@@ -325,7 +332,8 @@ async def _options(event: Any, ctx: Any, state: FSMContext) -> None:
             [btn("📏 Spread", C("bt", "o", "spread")), btn(OPTS["tz_offset"][0], C("bt", "o", "tz_offset"))],
             [btn("📤 Output: " + o["output"], "bt:out"), btn("⚙️ Strategy params", "bt:params")],
             [btn("📅 Change days", "bt:cd"), btn("🕒 Change timeframes", "bt:tfs")],
-            [btn("📐 Points table", "inst:menu"), btn("🔣 Change symbols", "bt:syms")],
+            [btn("🎚 TP / SL per timeframe", "ts:menu:bt"), btn("🔣 Change symbols", "bt:syms")],
+            [btn("📐 Points table", "inst:menu")],
             [btn("🚀 RUN BACKTEST", "bt:go")], [btn("❌ Cancel", "bt:menu")]]
     await show(event, "\n".join(lines), kb(rows))
 

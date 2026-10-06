@@ -29,3 +29,7 @@ Runs are stored in `backtest_runs` (config + brief summary).
 * Limits: ≈150,000 bars per timeframe (shorten the period / use a larger timeframe), 20-minute wall-clock cap, history depth = what the broker serves.
 
 > Not runtime-verified against a live cTrader account in the build environment; the engine, sandbox protocol and reports were verified offline with synthetic data (`tests/test_backtest_*.py`).
+
+
+## Lot / SL / TP
+They come from the shared **Trade settings** (`/set tp 15m 150`, `/set sl 15m 90`, `/set lot 0.1`, panel `/tpsl`) — see `trade_settings.md`. Every timeframe of a run uses its own values; the options screen shows them before you press RUN.

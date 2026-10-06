@@ -3,15 +3,18 @@
 BUY  : the stochastic line crosses UP through the buy level  (default 10)
 SELL : the stochastic line crosses DOWN through the sell level (default 90)
 
-All numbers below are editable from Telegram:
+Indicator numbers below are editable from Telegram:
   * Strategies -> Parameters       (defaults for every new bot)
   * Bots -> <bot> -> Settings      (per-bot override; the bot must be stopped)
+
+Lot size, stop loss and take profit are NOT in this file any more: they are controlled from Telegram
+(Settings -> Trade settings, or  /set tp 15m 150 ,  /set sl 15m 90 ,  /set lot 0.1 ) per timeframe, for live, demo and backtest.
 """
 from strategy_sdk import BaseStrategy
 
 STRATEGY_INFO = {
     "name": "Stochastic Cross",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Stochastic (MT5 style) - buy on cross up through level 10, sell on cross down through level 90.",
     "author": "platform",
     "parameters": {
@@ -33,11 +36,7 @@ STRATEGY_INFO = {
         "close_opposite": True,
         "use_level_exit": False,
         "min_bars_between_trades": 0,
-        # ---- size / protection ----
-        "lot_mode": "fixed",
-        "fixed_lots": 0.10,
-        "sl_pips": 30.0,
-        "tp_pips": 60.0,
+        # lot size / SL / TP live in the platform's Trade settings (Telegram), not here
         "comment": "STO",
     },
     "symbols": ["EURUSD"],
@@ -135,15 +134,9 @@ class StochasticCross(BaseStrategy):
             errs.append("signal_line must be main or signal")
         if p["trade_direction"] not in ("both", "buy", "sell"):
             errs.append("trade_direction must be both, buy or sell")
-        if p["lot_mode"] not in ("fixed", "risk"):
-            errs.append("lot_mode must be fixed or risk")
         for key in ("buy_level", "sell_level", "upper_level", "lower_level"):
             if not 0 <= float(p[key]) <= 100:
                 errs.append(key + " must be between 0 and 100")
-        if p["lot_mode"] == "fixed" and float(p["fixed_lots"]) <= 0:
-            errs.append("fixed_lots must be > 0")
-        if float(p["sl_pips"]) < 0 or float(p["tp_pips"]) < 0:
-            errs.append("sl_pips / tp_pips must be >= 0 (0 = disabled)")
         if int(p["min_bars_between_trades"]) < 0:
             errs.append("min_bars_between_trades must be >= 0")
         if errs:
@@ -203,13 +196,10 @@ class StochasticCross(BaseStrategy):
 
         if bool(p["close_opposite"]):
             out.append(self.close(symbol, "opposite signal", "SELL" if side == "BUY" else "BUY"))
-        sl = float(p["sl_pips"]) if float(p["sl_pips"]) > 0 else None
-        tp = float(p["tp_pips"]) if float(p["tp_pips"]) > 0 else None
-        lots = float(p["fixed_lots"]) if p["lot_mode"] == "fixed" else None
         comment = str(p["comment"])[:40] + " " + ("K" if p["signal_line"] == "main" else "D") + str(round(cur, 1))
         if side == "BUY":
-            out.append(self.buy(symbol, sl, tp, comment, "MARKET", None, lots))
+            out.append(self.buy(symbol, None, None, comment, "MARKET", None, None))
         else:
-            out.append(self.sell(symbol, sl, tp, comment, "MARKET", None, lots))
+            out.append(self.sell(symbol, None, None, comment, "MARKET", None, None))
         self.state[key + ":cool"] = int(p["min_bars_between_trades"])
         return out

@@ -12,6 +12,6 @@ One definition table (`app/market_data/instruments.py`) is used by live orders (
 | USDJPY | 0.01 | 3 | 1000 JPY ≈ 1000 ÷ USDJPY USD |
 
 * Decimals shown affect display only (Telegram, Excel number format). Orders still use the broker's price precision, and Excel cells keep the exact value.
-* **Stop loss, take profit, spread** (strategies `sl_pips`/`tp_pips`, backtest options, Risk Profile *max spread*) are all in these points. Example: gold `sl_pips = 30` is **$3.00**, not $0.30.
+* **Stop loss, take profit, spread** (Trade settings `/set sl|tp`, strategies' `sl_pips`/`tp_pips`, backtest options, Risk Profile *max spread*) are all in these points. Example: gold a stop of `30` points is **$3.00**, not $0.30.
 * Telegram: `/points` or Settings → 📐 Points & decimals (also inside Backtest) shows the exact values from your connected account (broker pip is shown for comparison); *Reference table* works without an account.
 * Instruments outside Gold / Oil / forex majors keep the broker's pip definition.

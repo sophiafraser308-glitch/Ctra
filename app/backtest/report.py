@@ -72,9 +72,10 @@ def settings_rows(results: Results, meta: dict[str, Any]) -> list[tuple[str, Any
     o = meta.get("options", {})
     rows: list[tuple[str, Any]] = [
         ("الرصيد الابتدائي", o.get("initial_balance")), ("عملة الحساب", results[0][1].cfg.deposit_ccy),
-        ("حجم اللوت", o.get("lot_size") or "حسب الاستراتيجية (احتياطي 0.10)"),
-        ("وقف الخسارة (نقاط)", o.get("sl_points") or "حسب الاستراتيجية"), ("الهدف / Take Profit (نقاط)", o.get("tp_points") or "حسب الاستراتيجية"),
         ("السبريد", o.get("spread")), ("فارق التوقيت (ساعة)", o.get("tz_offset"))]
+    # lot / SL / TP actually used, per timeframe (they come from the Telegram trade settings: /set tp 15m 150 ...)
+    for tf, lv in (meta.get("levels") or {}).items():
+        rows.append((f"[{tf}] اللوت · TP · SL (نقاط)", f"{lv['lot'] or 0.10:g} · TP {lv['tp'] or 'بدون'} · SL {lv['sl'] or 'بدون'}"))
     for sym, sp in meta.get("spreads", {}).items():
         rows.append((f"السبريد المستخدم {sym} (نقاط)", sp))
     rows += [("", ""), ("تعريف النقطة (Point)", "")]
@@ -123,6 +124,10 @@ def build_summary_text(results: Results, meta: dict[str, Any]) -> str:
             pf = "∞" if s["profit_factor"] is None and s["gross_profit"] > 0 else _num(s["profit_factor"], 1)
             lines.append(f"{'🏆' if tf == best[0] else '•'} <b>{e(tf)}</b>: {s['net_profit']:+,.0f} · {s['total_trades']} · {s['win_rate']:.0f}% · {pf} · {s['max_drawdown_pct']:.1f}%")
         lines += ["", f"الأفضل صافيًا: <b>{e(best[0])}</b> ({best[1].stats['net_profit']:+,.2f} {e(best[1].cfg.deposit_ccy)})", "التفاصيل الكاملة لكل فريم داخل ملف Excel."]
+    lv = meta.get("levels") or {}
+    if lv:
+        g = lambda v: f"{v:g}" if v else "—"      # noqa: E731
+        lines += ["", "<b>اللوت / TP / SL المستخدمة (نقاط)</b>"] + [f"• {e(tf)}: {g(v['lot'] or 0.10)} lot · TP {g(v['tp'])} · SL {g(v['sl'])}" for tf, v in lv.items()]
     warns = [f"{tf}: {w}" for tf, r in results for w in r.warnings][:4]
     lines += [f"⚠️ {e(w)}" for w in warns]
     lines.append("\n<i>محاكاة على شموع OHLC؛ لا تضمن نتائج مستقبلية.</i>")

@@ -50,12 +50,14 @@ def test_lwma_weights():
     assert abs(out[2] - (1 * 1 + 2 * 2 + 3 * 3) / 6) < 1e-12
 
 
-def test_fixed_lot_signals_and_level_logic():
+def test_signals_carry_no_size_or_protection_and_level_logic():
+    # lot / SL / TP are applied by the platform from the Telegram trade settings, never by the strategy
+    assert not {"lot_mode", "fixed_lots", "sl_pips", "tp_pips"} & set(PARAMS)
     sigs = run(PARAMS)
     entries = [(i, x) for i, x in sigs if x["side"] in ("BUY", "SELL")]
     assert any(x["side"] == "BUY" for _, x in entries) and any(x["side"] == "SELL" for _, x in entries)
     for _, x in entries:
-        assert x["volume_lots"] == 0.10 and x["stop_loss_pips"] == 30.0 and x["take_profit_pips"] == 60.0
+        assert "volume_lots" not in x and "stop_loss_pips" not in x and "take_profit_pips" not in x
     bars = wave(900)
     c = [b["c"] for b in bars]
     main, _ = mod.stochastic(c, c, c, 49, 15, 5, "lwma")
@@ -67,8 +69,8 @@ def test_fixed_lot_signals_and_level_logic():
             assert prev >= 90 > cur
 
 
-def test_risk_mode_has_no_volume_and_direction_filter():
-    p = dict(PARAMS, lot_mode="risk", trade_direction="buy")
+def test_direction_filter():
+    p = dict(PARAMS, trade_direction="buy")
     sigs = run(p)
     entries = [x for _, x in sigs if x["side"] in ("BUY", "SELL")]
     assert entries and all(x["side"] == "BUY" and "volume_lots" not in x for x in entries)

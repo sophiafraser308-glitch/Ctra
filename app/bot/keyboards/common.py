@@ -59,5 +59,6 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         [btn("🛡 Risk", "risk:menu"), btn("🔌 Connections", "conn:menu")],
         [btn("🩺 System Health", "health:menu"), btn("📜 Logs & Audit", "logs:menu")],
         [btn("🔔 Notifications", "notif:menu"), btn("⚙️ Settings", "set:menu")],
-        [btn("🧪 Backtest", "bt:menu"), btn("🚨 Emergency", "em:menu")],
+        [btn("🧪 Backtest", "bt:menu"), btn("🎚 TP / SL / Lot", "ts:menu")],
+        [btn("🚨 Emergency", "em:menu")],
     ])

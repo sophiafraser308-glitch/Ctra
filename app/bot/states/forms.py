@@ -32,6 +32,11 @@ class BacktestForm(StatesGroup):
     param = State()
 
 
+class TradeSettingsInput(StatesGroup):
+    value = State()
+    tf = State()
+
+
 class RiskEdit(StatesGroup):
     value = State()
     new_profile = State()

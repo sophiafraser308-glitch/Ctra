@@ -96,7 +96,10 @@ class BotRunner:
                     sym, bar = self._bars.popleft()
                     hist = ctx.market.get_bars(await self._acc_id(), bar.symbol_id, bar.timeframe, 200)
                     hist_d = [self._bar_dict(b) for b in hist if b.ts_ms < bar.ts_ms]
-                    await self._emit(await self.host.call("on_bar", {"symbol": sym, "timeframe": bar.timeframe, "bar": self._bar_dict(bar), "history": hist_d}))
+                    sigs = await self.host.call("on_bar", {"symbol": sym, "timeframe": bar.timeframe, "bar": self._bar_dict(bar), "history": hist_d})
+                    for sg in sigs:
+                        sg["timeframe"] = str(bar.timeframe).upper()      # the platform (not the strategy) records which timeframe fired
+                    await self._emit(sigs)
                 while self._events:
                     m, p = self._events.popleft()
                     await self.host.call(m, p)

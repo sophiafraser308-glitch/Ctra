@@ -27,6 +27,7 @@ from app.services.dashboard import DashboardService
 from app.services.emergency import EmergencyService
 from app.services.logs_service import LogQueryService
 from app.services.settings_service import SystemSettingsService
+from app.services.trade_settings_service import TradeSettingsService
 from app.strategies.manager import StrategyService
 from app.watchdog.service import WatchdogService
 from app.workers.heartbeat import HeartbeatService
@@ -56,7 +57,8 @@ class AppContext:
         self.recon = ReconciliationService(db, settings, self.gateway, self.positions, self.orders, self.audit, self.notifier, self.heartbeat)
         self.accounts = AccountService(db, settings, self.audit, self.notifier, self.gateway, self.tokens, self.oauth, self.crypto, self.heartbeat)
         self.strategies = StrategyService(db, settings, self.audit)
-        self.pipeline = SignalPipeline(db, self.gateway, self.risk, self.orders, self.positions, self.heartbeat)
+        self.trade_settings = TradeSettingsService(self.sys_settings, self.audit)
+        self.pipeline = SignalPipeline(db, self.gateway, self.risk, self.orders, self.positions, self.heartbeat, self.trade_settings)
         self.bots = BotManager(self)
         self.watchdog = WatchdogService(self)
         self.backtests = BacktestService(self)

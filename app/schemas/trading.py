@@ -15,6 +15,7 @@ class SignalIn(BaseModel):
     take_profit_pips: float | None = Field(default=None, gt=0, le=100000)
     volume_lots: float | None = Field(default=None, gt=0, le=1000)   # optional fixed size requested by the strategy
     close_side: Literal["BUY", "SELL"] | None = None                  # for CLOSE: only close this side
+    timeframe: str | None = Field(default=None, max_length=4, pattern=r"^[A-Z]{1,2}\d{1,3}$")   # stamped by the platform: the timeframe whose bar produced the signal
     confidence: float | None = Field(default=None, ge=0, le=1)
     comment: str | None = Field(default=None, max_length=64)
 
@@ -48,3 +49,4 @@ class OrderIntent(BaseModel):
     signal_id: str | None = None
     comment: str | None = None
     retry_of: str | None = None
+    timeframe: str | None = None

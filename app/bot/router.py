@@ -8,7 +8,7 @@ from aiogram import Dispatcher, F, Router
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery, ErrorEvent, Message
 
-from app.bot.handlers import accounts, backtest, bots, instruments, multiselect, orders, positions, risk, settings, start, strategies, system
+from app.bot.handlers import accounts, backtest, bots, instruments, multiselect, orders, positions, risk, settings, start, strategies, system, trade_settings
 from app.bot.keyboards.common import main_menu_kb
 from app.bot.middlewares.auth import AuthMiddleware
 from app.bot.middlewares.throttle import ThrottleMiddleware
@@ -59,7 +59,7 @@ def build_dispatcher(ctx: Any) -> Dispatcher:
             pass
         return True
 
-    for r in (start.router, accounts.router, bots.router, strategies.router, positions.router, orders.router,
+    for r in (start.router, trade_settings.router, accounts.router, bots.router, strategies.router, positions.router, orders.router,
               risk.router, system.router, settings.router, backtest.router, instruments.router, multiselect.router):
         dp.include_router(r)
 
