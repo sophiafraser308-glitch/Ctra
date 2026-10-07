@@ -58,6 +58,10 @@ class MarketDataService:
         self._status_prev: dict[tuple[str, int], MarketDataStatus] = {}
         self._task: asyncio.Task | None = None
         self.last_tick_at: datetime | None = None
+        self.loop_lag_s = 0.0                    # how late the last 5 s watchdog tick woke up = how busy the event loop was
+        self.loop_lag_max_s = 0.0
+        self._resub_at: dict[str, float] = {}    # account_id -> monotonic time of the last automatic re-subscription
+        self.resubscribes = 0
         gateway.tick_handlers.append(self._on_tick)
 
     # ---- lifecycle -------------------------------------------------
@@ -204,10 +208,45 @@ class MarketDataService:
                     out.append((c.account_id, name))
         return out
 
+    RESUB_COOLDOWN = 180.0        # seconds between automatic re-subscriptions of the same account
+    RESUB_MIN_SYMBOLS = 3         # "most symbols silent" only counts with at least this many subscribed symbols
+    RESUB_FRACTION = 0.6          # share of an account's symbols that must be STALE at once
+
+    async def _feed_watchdog(self) -> None:
+        """Connected but most prices silent at once => the spot subscription is probably dead: re-send it (idempotent, cheap)."""
+        by_acc: dict[str, list[MarketDataStatus]] = defaultdict(list)
+        for c in list(self.consumers.values()):
+            for sid in c.symbol_ids:
+                by_acc[c.account_id].append(self.status(c.account_id, sid))
+        now = time.monotonic()
+        for acc_id, sts in by_acc.items():
+            stale_n = sum(1 for x in sts if x == MarketDataStatus.STALE)
+            if len(sts) < self.RESUB_MIN_SYMBOLS or stale_n / len(sts) < self.RESUB_FRACTION or not self.gateway.is_connected(acc_id):
+                continue
+            if now - self._resub_at.get(acc_id, 0.0) < self.RESUB_COOLDOWN:
+                continue
+            self._resub_at[acc_id] = now
+            try:
+                n = await self.gateway.resubscribe_spots(acc_id)
+            except Exception as exc:
+                log.warning("feed watchdog: re-subscribe failed for %s: %s", acc_id, str(exc)[:100])
+                continue
+            self.resubscribes += 1
+            log.warning("feed watchdog: %d/%d symbols stale on %s -> re-subscribed %d symbols (loop lag %.1fs)", stale_n, len(sts), acc_id, n, self.loop_lag_s)
+            await self.notifier.notify("STALE_MARKET_DATA", f"Price feed silent for {stale_n}/{len(sts)} symbols (account {acc_id}). Re-subscribed automatically."
+                                       + (f"\n⏱ Bot event-loop lag: {self.loop_lag_s:.1f}s" if self.loop_lag_s >= 1 else "\n(bot loop is healthy: the silence comes from the broker feed / quiet market)"),
+                                       Severity.WARNING, dedup_key=f"feedresub:{acc_id}")
+
     async def _watch(self) -> None:
         while True:
+            t0 = time.monotonic()
             await asyncio.sleep(5)
+            self.loop_lag_s = max(0.0, time.monotonic() - t0 - 5)      # > ~1 s means something blocked the event loop
+            self.loop_lag_max_s = max(self.loop_lag_max_s * 0.98, self.loop_lag_s)
+            if self.loop_lag_s >= 2:
+                log.warning("event loop was blocked for %.1fs (price ticks were delayed)", self.loop_lag_s)
             try:
+                await self._feed_watchdog()
                 stale = 0
                 for c in list(self.consumers.values()):
                     for sid, name in c.symbol_ids.items():
@@ -218,10 +257,12 @@ class MarketDataService:
                         if st != MarketDataStatus.FRESH:
                             stale += 1
                         if st == MarketDataStatus.STALE and prev == MarketDataStatus.FRESH and self.gateway.is_connected(c.account_id):
-                            await self.notifier.notify("STALE_MARKET_DATA", f"Market data STALE for {name} (account {c.account_id}). New trading is blocked by risk policy.",
+                            await self.notifier.notify("STALE_MARKET_DATA", f"Market data STALE for {name} (account {c.account_id}). New trading is blocked by risk policy."
+                                                       + (f"\n⏱ Bot event-loop lag: {self.loop_lag_s:.1f}s" if self.loop_lag_s >= 1 else ""),
                                                        Severity.WARNING, dedup_key=f"stale:{c.account_id}:{name}")
                         elif st == MarketDataStatus.FRESH and prev == MarketDataStatus.STALE:
                             log.info("market data recovered %s", name)
-                self.hb.update("market_data", "OK" if stale == 0 else "DEGRADED", subscriptions=len(self.consumers), stale=stale)
+                self.hb.update("market_data", "OK" if stale == 0 else "DEGRADED", subscriptions=len(self.consumers), stale=stale,
+                               loop_lag_s=round(self.loop_lag_s, 2), loop_lag_max_s=round(self.loop_lag_max_s, 2), auto_resubscribes=self.resubscribes)
             except Exception as exc:
                 log.error("market data watch error: %s", type(exc).__name__)

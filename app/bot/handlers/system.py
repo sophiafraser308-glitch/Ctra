@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery
+from aiogram.types import BufferedInputFile, CallbackQuery
 
 from app.bot.callbacks.data import cb as C, split
 from app.bot.handlers.common import esc, fmt_ago, fmt_dt, need, run_command, show, status_icon, toast
@@ -69,7 +69,7 @@ async def health(cb: CallbackQuery, ctx: Any) -> None:
     wd = ctx.watchdog
     text = (f"🩺 <b>System health</b>\n" + "\n".join(lines) + ("\n<b>Bot workers</b>\n" + "\n".join(botlines) if botlines else "")
             + f"\n<b>Watchdog</b> last {fmt_ago(wd.last_run_at)} · findings: {esc('; '.join(wd.last_findings) or 'none')}"
-            + f"\n<b>Reconciliation</b> last {fmt_ago(ctx.recon.last_run_at)} · stale market symbols {len(ctx.market.stale_list())}\nHeartbeat writer {fmt_ago(ctx.heartbeat.last_beat_at)}")
+            + f"\n<b>Reconciliation</b> last {fmt_ago(ctx.recon.last_run_at)} · stale market symbols {len(ctx.market.stale_list())}\n<b>Price feed</b> loop lag {ctx.market.loop_lag_s:.1f}s (max {ctx.market.loop_lag_max_s:.1f}s) · auto re-subscribes {ctx.market.resubscribes}\nHeartbeat writer {fmt_ago(ctx.heartbeat.last_beat_at)}")
     await show(cb, text, kb([[btn("🔄 Refresh", "health:menu"), btn("🧮 Reconcile now", "health:recon")], [btn("🧾 Reconciliation events", "health:rev")], [btn("🏠 Menu", "home")]]))
     await toast(cb, "")
 
@@ -90,58 +90,94 @@ async def health_rev(cb: CallbackQuery, ctx: Any) -> None:
     await toast(cb, "")
 
 
-# ---- Logs & audit ---------------------------------------------------------------------------------------
+# ---- Logs & audit (every view is a .txt file you can open / search / forward) -------------------------------
+REPORT_ROWS = 2000      # newest N rows per section
+_J = lambda v: "" if v in (None, {}, []) else str(v).replace("\n", " ")[:300]      # noqa: E731
+
+
+def _ts(dt: Any) -> str:
+    return f"{dt:%Y-%m-%d %H:%M:%S}" if dt else "-"
+
+
+async def _section_logs(ctx: Any, cat: str) -> tuple[str, int]:
+    if cat == "ERR":
+        from sqlalchemy import select
+        from app.models import LogEntry
+        async with ctx.db.session() as s:
+            rows = list((await s.execute(select(LogEntry).where(LogEntry.severity.in_(["ERROR", "CRITICAL"])).order_by(LogEntry.id.desc()).limit(REPORT_ROWS))).scalars())
+        title = "LOGS - errors only"
+    else:
+        rows, _ = await ctx.logs.logs(None if cat == "ALL" else cat, None, 0, REPORT_ROWS)
+        title = f"LOGS - {cat}"
+    lines = [f"{_ts(r.ts)} | {r.severity:<8} | {r.category:<10} | {r.message}" + (f" | {_J(r.context)}" if r.context else "") for r in rows]
+    return f"=== {title} (newest first, {len(rows)} rows) ===\n" + ("\n".join(lines) or "(none)"), len(rows)
+
+
+async def _section_audit(ctx: Any) -> tuple[str, int]:
+    rows = await ctx.audit.recent(REPORT_ROWS, 0)
+    lines = []
+    for r in rows:
+        extra = " | ".join(x for x in (f"error: {_J(r.error)}" if r.error else "", f"before: {_J(r.previous_state)}" if r.previous_state else "",
+                                       f"after: {_J(r.new_state)}" if r.new_state else "") if x)
+        lines.append(f"{_ts(r.ts)} | user {r.user_id or '-'} | {r.action} | {r.target or '-'} | {r.result}" + (f" | {extra}" if extra else ""))
+    return f"=== AUDIT TRAIL (newest first, {len(rows)} rows) ===\n" + ("\n".join(lines) or "(none)"), len(rows)
+
+
+async def _section_cmds(ctx: Any) -> tuple[str, int]:
+    rows, _ = await ctx.logs.commands(0, REPORT_ROWS)
+    lines = [f"{_ts(r.created_at)} | user {r.user_id} | {r.type} | {r.target_id or '-'} | {r.status}" for r in rows]
+    return f"=== COMMANDS (newest first, {len(rows)} rows) ===\n" + ("\n".join(lines) or "(none)"), len(rows)
+
+
+async def _send_report(cb: CallbackQuery, ctx: Any, kind: str) -> None:
+    """kind: ERR | ALL | <category> | AUDIT | CMD | FULL"""
+    await toast(cb, "📄 Preparing the report…")
+    if kind == "AUDIT":
+        parts = [await _section_audit(ctx)]
+    elif kind == "CMD":
+        parts = [await _section_cmds(ctx)]
+    elif kind == "FULL":
+        parts = [await _section_logs(ctx, "ERR"), await _section_logs(ctx, "ALL"), await _section_audit(ctx), await _section_cmds(ctx)]
+    else:
+        parts = [await _section_logs(ctx, kind)]
+    now = utcnow()
+    head = f"cTrader Telegram Platform - report '{kind}'\nGenerated {now:%Y-%m-%d %H:%M:%S} UTC · times below are UTC · newest first · max {REPORT_ROWS} rows per section\n" + "=" * 78 + "\n\n"
+    body = head + "\n\n".join(p[0] for p in parts) + "\n"
+    total = sum(p[1] for p in parts)
+    name = f"report_{kind.lower()}_{now:%Y%m%d_%H%M%S}.txt"
+    if cb.message:
+        await cb.message.answer_document(BufferedInputFile(body.encode("utf-8"), filename=name), caption=f"📄 {kind} · {total} rows")
+
+
 @router.callback_query(F.data == "logs:menu")
 async def logs_menu(cb: CallbackQuery) -> None:
     cats = [c.value for c in Category]
     rows = [[btn("🧯 Errors only", "logs:l:ERR:0"), btn("📋 All logs", "logs:l:ALL:0")]]
     cb_btns = [btn(c.title()[:12], f"logs:l:{c}:0") for c in cats]
     rows += [cb_btns[i:i + 3] for i in range(0, len(cb_btns), 3)]
-    rows += [[btn("🧾 Audit trail", "logs:audit:0"), btn("⌨️ Commands", "logs:cmd:0")], [btn("🏠 Menu", "home")]]
-    await show(cb, "📜 <b>Logs & Audit</b>\nChoose a category:", kb(rows))
+    rows += [[btn("🧾 Audit trail", "logs:audit:0"), btn("⌨️ Commands", "logs:cmd:0")], [btn("📦 Full report (everything)", "logs:full")], [btn("🏠 Menu", "home")]]
+    await show(cb, "📜 <b>Logs & Audit</b>\nEach button sends a <b>.txt file</b> (newest first, UTC) that you can open, search and forward.", kb(rows))
     await toast(cb, "")
 
 
 @router.callback_query(F.data.startswith("logs:l:"))
 async def logs_list(cb: CallbackQuery, ctx: Any) -> None:
-    _, _, cat, page = split(cb.data)[:4]
-    page = int(page)
-    q_cat = None if cat in ("ALL", "ERR") else cat
-    rows, total = await ctx.logs.logs(q_cat, None, page * 8, 8) if cat != "ERR" else await _errors(ctx, page)
-    pages = max(1, (total + 7) // 8)
-    text = f"📜 <b>Logs · {cat}</b> ({total})\n" + ("\n".join(f"<code>{r.ts:%m-%d %H:%M:%S}</code> {r.severity[:4]} {esc(r.message[:110])}" for r in rows) or "None")
-    await show(cb, text, kb([nav_row(f"logs:l:{cat}", page, pages), back_home("logs:menu")]))
-    await toast(cb, "")
-
-
-async def _errors(ctx: Any, page: int):
-    from sqlalchemy import func, select
-    from app.models import LogEntry
-    async with ctx.db.session() as s:
-        rows = list((await s.execute(select(LogEntry).where(LogEntry.severity.in_(["ERROR", "CRITICAL"])).order_by(LogEntry.id.desc()).offset(page * 8).limit(8))).scalars())
-        n = (await s.execute(select(func.count()).select_from(LogEntry).where(LogEntry.severity.in_(["ERROR", "CRITICAL"])))).scalar_one()
-    return rows, int(n)
+    await _send_report(cb, ctx, split(cb.data)[2])
 
 
 @router.callback_query(F.data.startswith("logs:audit:"))
 async def audit_list(cb: CallbackQuery, ctx: Any) -> None:
-    page = int(split(cb.data)[2])
-    rows = await ctx.audit.recent(8, page * 8)
-    total = await ctx.audit.count()
-    pages = max(1, (total + 7) // 8)
-    text = "🧾 <b>Audit trail</b>\n" + "\n".join(f"<code>{r.ts:%m-%d %H:%M}</code> u{r.user_id or '-'} <b>{esc(r.action)}</b> {esc((r.target or '')[:24])} {r.result}" for r in rows)
-    await show(cb, text, kb([nav_row("logs:audit", page, pages), back_home("logs:menu")]))
-    await toast(cb, "")
+    await _send_report(cb, ctx, "AUDIT")
 
 
 @router.callback_query(F.data.startswith("logs:cmd:"))
 async def cmd_list(cb: CallbackQuery, ctx: Any) -> None:
-    page = int(split(cb.data)[2])
-    rows, total = await ctx.logs.commands(page * 8, 8)
-    pages = max(1, (total + 7) // 8)
-    text = "⌨️ <b>Commands</b>\n" + "\n".join(f"<code>{r.created_at:%m-%d %H:%M}</code> {esc(r.type)} {esc(r.target_id or '')} <b>{r.status}</b> u{r.user_id}" for r in rows)
-    await show(cb, text, kb([nav_row("logs:cmd", page, pages), back_home("logs:menu")]))
-    await toast(cb, "")
+    await _send_report(cb, ctx, "CMD")
+
+
+@router.callback_query(F.data == "logs:full")
+async def full_report(cb: CallbackQuery, ctx: Any) -> None:
+    await _send_report(cb, ctx, "FULL")
 
 
 # ---- Notifications ----------------------------------------------------------------------------------------

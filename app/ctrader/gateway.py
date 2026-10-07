@@ -350,6 +350,15 @@ class CTraderGateway:
         if new and sess.authed:
             await self._read(account_id, md_proto.build_subscribe_spots(sess.ctid, new))
 
+    async def resubscribe_spots(self, account_id: str) -> int:
+        """Re-send the spot subscription of every symbol of this account (used when the price feed went silent while connected)."""
+        sess = self.sessions.get(account_id)
+        if not sess or not sess.authed or not sess.subscribed:
+            return 0
+        ids = list(sess.subscribed)
+        await self._read(account_id, md_proto.build_subscribe_spots(sess.ctid, ids))
+        return len(ids)
+
     async def unsubscribe_spots(self, account_id: str, symbol_ids: list[int]) -> None:
         sess = self.sessions.get(account_id)
         if not sess:

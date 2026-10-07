@@ -179,7 +179,7 @@ class BacktestService:
             await status("📝 Building reports…")
             want = o["output"]
             xlsx = await asyncio.to_thread(build_xlsx, results, meta) if want in ("both", "xlsx") else None
-            csv_b = build_csv(results, meta) if want in ("both", "csv") else None
+            csv_b = await asyncio.to_thread(build_csv, results, meta) if want in ("both", "csv") else None
             text = build_summary_text(results, meta)
             await self._finish_row(run_id, "DONE", total_bars, self._brief(results), None)
             safe = re.sub(r"[^A-Za-z0-9_-]+", "_", st.name)
@@ -221,13 +221,17 @@ class BacktestService:
                 spec.conv = await self._conversion(req.account_id, quote, deposit, warm_from, req.date_to_ms, tf)
                 spec.conv_missing = spec.conv is None
             specs[name] = spec
-        items: list[tuple[int, str, dict, bool]] = []
-        warm_items: list[tuple[int, str, dict, bool]] = []
-        for name, bars in series.items():
-            before = [b for b in bars if b.ts_ms < req.date_from_ms][-WARMUP:]
-            warm_items += [(b.ts_ms, name, self._bar(b), True) for b in before]
-            items += [(b.ts_ms, name, self._bar(b), False) for b in bars if req.date_from_ms <= b.ts_ms < req.date_to_ms]
-        items.sort(key=lambda x: (x[0], x[1]))
+        def build_timeline() -> tuple[list, list]:        # CPU-bound: runs in a worker thread so live ticks keep flowing
+            items_: list[tuple[int, str, dict, bool]] = []
+            warm_: list[tuple[int, str, dict, bool]] = []
+            for name_, bars_ in series.items():
+                before = [b for b in bars_ if b.ts_ms < req.date_from_ms][-WARMUP:]
+                warm_ += [(b.ts_ms, name_, self._bar(b), True) for b in before]
+                items_ += [(b.ts_ms, name_, self._bar(b), False) for b in bars_ if req.date_from_ms <= b.ts_ms < req.date_to_ms]
+            items_.sort(key=lambda x: (x[0], x[1]))
+            return items_, warm_
+
+        items, warm_items = await asyncio.to_thread(build_timeline)
         if not items:
             raise ValidationFailed(f"No {tf} bars inside the selected period")
         if len(items) > MAX_BARS and tf not in ("D1", "W1", "MN1"):
@@ -239,7 +243,8 @@ class BacktestService:
                        sl_forced=True, tp_forced=True, tz_offset_hours=float(o["tz_offset"]), tf_ms=tf_ms, deposit_ccy=deposit)
         engine = BacktestEngine(cfg, specs)
         host = StrategyHost(ctx.settings, f"backtest:{st.name}:{tf}", source, ver.meta["class_name"], params,
-                            {"symbols": req.symbols, "timeframes": [tf], "environment": "BACKTEST", "bot_id": "backtest"})
+                            {"symbols": req.symbols, "timeframes": [tf], "environment": "BACKTEST", "bot_id": "backtest"},
+                            low_priority=True)      # backtest sandbox yields the CPU to live bots / market data
         await status(f"{tag}🧠 Starting strategy sandbox…")
         await host.start()
         try:
@@ -251,9 +256,11 @@ class BacktestService:
                 chunk = timeline[base:base + CHUNK]
                 res = await host.call("bt_chunk", {"base": base, "items": [[s, tf, b, w] for _, s, b, w in chunk]}, timeout=240)
                 sig_by_idx = {r["i"]: r["s"] for r in res}
-                for k, (ts, sym_name, bar, warm) in enumerate(chunk):
-                    if not warm:
-                        engine.feed(ts, sym_name, bar, sig_by_idx.get(base + k, []))
+                def feed_chunk(chunk=chunk, base=base, sig_by_idx=sig_by_idx) -> None:     # simulation step off the event loop
+                    for k, (ts, sym_name, bar, warm) in enumerate(chunk):
+                        if not warm:
+                            engine.feed(ts, sym_name, bar, sig_by_idx.get(base + k, []))
+                await asyncio.to_thread(feed_chunk)
                 pct = min(100, int((base + len(chunk)) / total * 100))
                 await status(f"{tag}⚙️ Simulating… {pct}% ({base + len(chunk):,}/{total:,} bars) · trades {len(engine.trades)}")
                 await asyncio.sleep(0)

@@ -22,7 +22,9 @@ SDK_FILE = Path(__file__).with_name("sdk.py")
 
 
 class StrategyHost:
-    def __init__(self, settings: Settings, label: str, source: str, class_name: str, params: dict[str, Any], context: dict[str, Any]) -> None:
+    def __init__(self, settings: Settings, label: str, source: str, class_name: str, params: dict[str, Any], context: dict[str, Any],
+                 low_priority: bool = False) -> None:
+        self.low_priority = low_priority          # True for backtests: lower OS priority so live bots / market data keep the CPU
         self.s, self.label = settings, label
         self.source, self.class_name, self.params, self.context = source, class_name, params, context
         self.proc: asyncio.subprocess.Process | None = None
@@ -57,11 +59,15 @@ class StrategyHost:
                 raise PlatformError("STRATEGY_SANDBOX_MODE=docker but the docker CLI is not available")
             cmd = ["docker", "run", "--rm", "-i", "--network", "none", "--read-only", "--cap-drop", "ALL",
                    "--security-opt", "no-new-privileges", "--pids-limit", "32", "--memory", f"{self.s.strategy_memory_mb + 64}m",
-                   "--cpus", "1", "--user", "65534:65534", "--tmpfs", "/tmp:size=1m,noexec", self.s.strategy_docker_image,
+                   "--cpus", "1", *(["--cpu-shares", "128"] if self.low_priority else []), "--user", "65534:65534", "--tmpfs", "/tmp:size=1m,noexec", self.s.strategy_docker_image,
                    "python", "-I", "/app/app/strategies/runner.py"]
             return cmd, {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}, self._tmp
         env = {"PATH": "/usr/bin:/bin", "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1", "LANG": "C.UTF-8"}
-        return [sys.executable, "-I", "-s", str(RUNNER)], env, self._tmp
+        cmd = [sys.executable, "-I", "-s", str(RUNNER)]
+        nice = shutil.which("nice")
+        if self.low_priority and nice:                 # backtests run at lower CPU priority (nice execs in place: same pid)
+            cmd = [nice, "-n", "10", *cmd]
+        return cmd, env, self._tmp
 
     async def start(self) -> None:
         cmd, env, cwd = self._command()
