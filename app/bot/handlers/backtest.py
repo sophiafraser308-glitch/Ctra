@@ -96,7 +96,20 @@ async def pick_strategy(cb: CallbackQuery, ctx: Any, state: FSMContext) -> None:
     sid = split(cb.data)[2]
     st = await ctx.strategies.get(sid)
     bt["strategy_id"] = sid
+    bt.pop("bot_id", None)
     await _save(state, bt)
+    bots = [b for b in await ctx.bots.list() if b.strategy_id == sid]
+    if bots:
+        rows = [[btn(f"🤖 {b.name[:24]} · {','.join(b.symbols or [])[:14]} · {','.join(b.timeframes or [])[:10]}", C("bt", "b", b.id))] for b in bots[:10]]
+        await show(cb, f"🧪 <b>Step 1b</b> — use the settings of one of your bots for <b>{esc(st.name)}</b>?\nThe test then uses that bot's strategy version, parameters, symbols, timeframes and risk profile "
+                       "(max open positions, max trades/day, stop-loss required, max lots).",
+                   kb(rows + [[btn("⚪ No bot — strategy defaults", C("bt", "b", "-"))], back_home("bt:menu")]))
+        await toast(cb, "")
+        return
+    await _ask_account(cb, ctx, st)
+
+
+async def _ask_account(cb: CallbackQuery, ctx: Any, st: Any) -> None:
     accs = [a for a in await ctx.accounts.list() if ctx.gateway.is_connected(a.id)]
     if not accs:
         await show(cb, "No connected account. History is downloaded from a connected cTrader account (a DEMO account is fine) — connect one first.", kb([[btn("🏦 Accounts", "acc:menu")], back_home("bt:menu")]))
@@ -106,12 +119,42 @@ async def pick_strategy(cb: CallbackQuery, ctx: Any, state: FSMContext) -> None:
     await toast(cb, "")
 
 
+@router.callback_query(F.data.startswith("bt:b:"))
+async def pick_bot(cb: CallbackQuery, ctx: Any, state: FSMContext) -> None:
+    bt = await _bt(state)
+    bid = split(cb.data)[2]
+    st = await ctx.strategies.get(bt["strategy_id"])
+    if bid == "-":
+        bt.pop("bot_id", None)
+        await _save(state, bt)
+        await _ask_account(cb, ctx, st)
+        await toast(cb, "")
+        return
+    bot = await ctx.bots.get(bid)
+    bt["bot_id"] = bot.id
+    bt["symbols"] = list(bot.symbols or [])
+    bt["timeframes"] = list(bot.timeframes or [])
+    if ctx.gateway.is_connected(bot.account_id):
+        bt["account_id"] = bot.account_id
+        await _save(state, bt)
+        await show(cb, f"🤖 Using bot <b>{esc(bot.name)}</b>: {esc(', '.join(bt['symbols']))} · {esc(', '.join(bt['timeframes']))}\nParameters: <code>{esc(str(bot.parameters or {}))}</code>")
+        await _period_menu(cb, bt["timeframes"])
+    else:
+        await _save(state, bt)
+        await _ask_account(cb, ctx, st)
+    await toast(cb, "")
+
+
 @router.callback_query(F.data.startswith("bt:a:"))
 async def pick_account(cb: CallbackQuery, ctx: Any, state: FSMContext) -> None:
     bt = await _bt(state)
     bt["account_id"] = split(cb.data)[2]
     await _save(state, bt)
-    ver = await _active_version(ctx, bt["strategy_id"])
+    ver = await _active_version(ctx, bt["strategy_id"], bt.get("bot_id"))
+    if bt.get("bot_id") and bt.get("symbols") and bt.get("timeframes"):
+        await _period_menu(cb, bt["timeframes"])
+        await toast(cb, "")
+        return
     await start_symbol_pick(cb, state, ctx, bt["account_id"], ver.meta.get("symbols", []), "bt_sym", "Step 3/5 — symbols (select several)")
     await toast(cb, "")
 
@@ -120,7 +163,7 @@ async def _sym_done(cb: CallbackQuery, state: FSMContext, ctx: Any, sel: list[st
     bt = await _bt(state)
     bt["symbols"] = sel
     await _save(state, bt)
-    ver = await _active_version(ctx, bt["strategy_id"])
+    ver = await _active_version(ctx, bt["strategy_id"], bt.get("bot_id"))
     await start_tf_pick(cb, state, ver.meta.get("timeframes", []), "bt_tf", False, "Step 4/5 — timeframes (select several)")
 
 
@@ -420,7 +463,9 @@ async def opt_value(m: Message, state: FSMContext, ctx: Any) -> None:
 
 
 # ---- strategy parameter overrides -----------------------------------------------------------------------------------------------
-async def _active_version(ctx: Any, strategy_id: str) -> Any:
+async def _active_version(ctx: Any, strategy_id: str, bot_id: str | None = None) -> Any:
+    if bot_id:                                          # a chosen bot is pinned to its own version
+        return await ctx.strategies.get_version((await ctx.bots.get(bot_id)).strategy_version_id)
     st = await ctx.strategies.get(strategy_id)
     vers = await ctx.strategies.versions(strategy_id)
     return next((v for v in vers if v.id == st.active_version_id), vers[0])
@@ -429,8 +474,11 @@ async def _active_version(ctx: Any, strategy_id: str) -> Any:
 @router.callback_query(F.data == "bt:params")
 async def params_list(cb: CallbackQuery, ctx: Any, state: FSMContext) -> None:
     bt = await _bt(state)
-    ver = await _active_version(ctx, bt["strategy_id"])
-    eff = {**ver.parameters, **bt["params"]}
+    ver = await _active_version(ctx, bt["strategy_id"], bt.get("bot_id"))
+    base = dict(ver.parameters)
+    if bt.get("bot_id"):
+        base.update({k: v for k, v in ((await ctx.bots.get(bt["bot_id"])).parameters or {}).items() if k in base})
+    eff = {**base, **bt["params"]}
     rows = [[btn(f"{'✏️ ' if k in bt['params'] else ''}{k} = {eff[k]}"[:44], C("bt", "p", k))] for k in list(ver.parameters)[:20]]
     rows.append([btn("🧹 Reset overrides", "bt:pr"), btn("⬅️ Back", "bt:opts")])
     await show(cb, f"⚙️ <b>Strategy parameters for this backtest</b> (v{ver.version})\nOnly affects this run; defaults stay untouched.", kb(rows))
@@ -457,7 +505,7 @@ async def param_edit(cb: CallbackQuery, state: FSMContext) -> None:
 async def param_value(m: Message, state: FSMContext, ctx: Any) -> None:
     d = await state.get_data()
     bt = await _bt(state)
-    ver = await _active_version(ctx, bt["strategy_id"])
+    ver = await _active_version(ctx, bt["strategy_id"], bt.get("bot_id"))
     key, cur, raw = d["param_key"], ver.parameters[d["param_key"]], (m.text or "").strip().translate(AR_DIGITS)
     try:
         if isinstance(cur, bool):
@@ -497,7 +545,7 @@ async def run(cb: CallbackQuery, ctx: Any, state: FSMContext, role: Role, bot: B
     tz = float(bt["opts"]["tz_offset"])
     to_ms = min(_to_ms(bt["date_to"], tz, True), int(time.time() * 1000))
     req = BtRequest(user_id=cb.from_user.id, strategy_id=bt["strategy_id"], account_id=bt["account_id"], symbols=bt["symbols"], timeframes=bt["timeframes"],
-                    date_from_ms=_to_ms(bt["date_from"], tz), date_to_ms=to_ms, options=dict(bt["opts"]), params=dict(bt["params"]))
+                    date_from_ms=_to_ms(bt["date_from"], tz), date_to_ms=to_ms, options=dict(bt["opts"]), params=dict(bt["params"]), bot_id=bt.get("bot_id"))
     ctx.backtests.preflight(req)               # raises ValidationFailed (shown to the user) before anything starts
     if ctx.backtests.busy:
         raise ValidationFailed("Another backtest is running. Wait for it to finish (or cancel it).")

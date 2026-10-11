@@ -12,7 +12,7 @@ cryptography>=42
 openpyxl>=3.1
 ctrader-open-api>=0.9.2
 twisted>=23.10
+service_identity>=24.1.0
 # Tests
 pytest>=8
 pytest-asyncio>=0.23
-service_identity>=24.1.0

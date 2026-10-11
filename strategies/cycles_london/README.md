@@ -8,7 +8,8 @@ Upload `strategy.py` in Telegram: Strategies → Upload, then create a bot with 
 * Entry 1: cycle start + digit-sum of the integer part of the open (4150 → 10 min).
 * Entry 2: cycle start + (integer part of the open mod 100) minutes (4150 → 50 min).
 * At the entry bar: close > level → BUY, close < level → SELL, close == level → no trade.
-* Closed on the last M1 bar of the cycle (unless TP/SL hit first). Tag `C`.
+* `s1_mode=flip` (default): two signals in the same direction → both trades stay open; an opposite second signal first closes the earlier trade(s) of that cycle, then opens the new one. `independent` = the original indicator (opposite trades stay open side by side).
+* Whatever is still open is closed on the last M1 bar of the cycle (shown as "SIGNAL_CLOSE" / "إغلاق بإشارة") unless TP/SL hit first. Tag `C`.
 
 ## S2 — London 5-minute breakout
 * London time (DST handled in code): minutes :30–:34 of each hour between `s2_first_hour`..`s2_last_hour` give High/Low.
@@ -21,6 +22,7 @@ Upload `strategy.py` in Telegram: Strategies → Upload, then create a bot with 
 | cycle_clock | ny17 | how 4H candles are aligned: `ny17` (17:00 New York, DST aware), `utc` (00/04/08… UTC), `damascus` (00/04/08… UTC+3), `custom` |
 | cycle_utc_offset_hours / cycle_anchor_hour | 0 / 0 | only for `custom`: boundaries at local hours anchor, anchor+4, … |
 | s1_enabled, s1_entry1_enabled, s1_entry2_enabled | true | switches |
+| s1_mode | flip | `flip` or `independent` (see S1) |
 | s1_lots, s2_lots | 0.10 | fixed lots (when `lot_mode` = fixed) |
 | s1_tp_points, s1_sl_points, s2_tp_points, s2_sl_points | 0 | platform points, 0 = off (gold: 1 point = 0.1 → Pine 7.0 = 70 points) |
 | s2_enabled, s2_first_hour, s2_last_hour | true, 1, 23 | London hours (0–23) whose :30 candle is used |

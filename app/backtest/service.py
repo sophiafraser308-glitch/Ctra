@@ -41,7 +41,9 @@ class BtRequest:
     date_from_ms: int
     date_to_ms: int
     options: dict[str, Any] = field(default_factory=dict)
-    params: dict[str, Any] = field(default_factory=dict)       # overrides of the strategy's parameters
+    params: dict[str, Any] = field(default_factory=dict)       # overrides of the strategy's parameters (on top of the bot's)
+    bot_id: str | None = None                                  # run with this bot's version, parameters and risk profile
+    risk: dict[str, Any] = field(default_factory=dict)         # filled by run(): risk-profile limits applied to the engine
 
 
 @dataclass
@@ -137,12 +139,23 @@ class BacktestService:
         tfs = [tf for tf in TF_ORDER if tf in req.timeframes]
         acc = await ctx.accounts.get(req.account_id)
         st = await ctx.strategies.get(req.strategy_id)
-        vid = st.active_version_id or (await ctx.strategies.versions(req.strategy_id))[0].id
+        bot_params: dict[str, Any] = {}
+        if req.bot_id:                                    # the bot's own settings drive the test: its pinned version, parameters, risk profile
+            bot = await ctx.bots.get(req.bot_id)
+            if bot.strategy_id != req.strategy_id:
+                raise ValidationFailed("The selected bot belongs to another strategy")
+            vid = bot.strategy_version_id
+            bot_params = dict(bot.parameters or {})
+            prof = await ctx.risk.profile_for(acc, bot.risk_profile_id)
+            req.risk = {"profile": prof.name, "max_open_positions": int(prof.max_open_positions), "max_trades_per_day": int(prof.max_trades_per_day),
+                        "require_stop_loss": bool(prof.require_stop_loss), "max_position_lots": float(prof.max_position_lots), "bot": bot.name}
+        else:
+            vid = st.active_version_id or (await ctx.strategies.versions(req.strategy_id))[0].id
         source, ver = await ctx.strategies.load_source(vid)
         unknown = [k for k in req.params if k not in ver.parameters]
         if unknown:
             raise ValidationFailed(f"Unknown strategy parameters: {unknown}")
-        params = {**ver.parameters, **req.params}
+        params = {**ver.parameters, **{k: v for k, v in bot_params.items() if k in ver.parameters}, **req.params}
         run_id = await self._create_row(req, ver.id, o, tfs)
 
         async def status(text: str) -> None:
@@ -172,7 +185,7 @@ class BacktestService:
             tzs = int(tz * 3_600_000)
             meta = {"strategy": st.name, "version": ver.version, "account": f"{acc.name} ({acc.environment})", "symbols": req.symbols,
                     "timeframes": tfs, "date_from": self._d(req.date_from_ms, tzs), "date_to": self._d(req.date_to_ms - 1, tzs),
-                    "tz_label": f"UTC{tz:+g}", "bars": total_bars, "seconds": seconds, "params": params, "spreads": spreads,
+                    "tz_label": f"UTC{tz:+g}", "bars": total_bars, "seconds": seconds, "params": params, "risk": req.risk, "spreads": spreads,
                     "options": o, "points": points, "display_decimals": display_dec}
             await status("📝 Building reports…")
             want = o["output"]
@@ -233,6 +246,11 @@ class BacktestService:
         timeline = warm_items + items
         cfg = BtConfig(initial_balance=float(o["initial_balance"]), lot_override=float(o["lot_size"]), sl_override=float(o["sl_points"]),
                        tp_override=float(o["tp_points"]), tz_offset_hours=float(o["tz_offset"]), tf_ms=tf_ms, deposit_ccy=deposit)
+        if req.risk:
+            cfg.max_open_positions = req.risk["max_open_positions"]
+            cfg.max_trades_per_day = req.risk["max_trades_per_day"]
+            cfg.require_stop_loss = req.risk["require_stop_loss"]
+            cfg.max_lots = req.risk["max_position_lots"]
         engine = BacktestEngine(cfg, specs)
         host = StrategyHost(ctx.settings, f"backtest:{st.name}:{tf}", source, ver.meta["class_name"], params,
                             {"symbols": req.symbols, "timeframes": [tf], "environment": "BACKTEST", "bot_id": "backtest"})

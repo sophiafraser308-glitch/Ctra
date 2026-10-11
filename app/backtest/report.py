@@ -80,6 +80,11 @@ def settings_rows(results: Results, meta: dict[str, Any]) -> list[tuple[str, Any
     rows += [("", ""), ("تعريف النقطة (Point)", "")]
     for sym, d in meta.get("points", {}).items():
         rows.append((sym, f"1 نقطة = {d['point']} · المنازل المعروضة {d['decimals']} · قيمة النقطة للوت الواحد ≈ {d['value']:.4g} {d['ccy']}"))
+    rk = meta.get("risk") or {}
+    if rk:
+        rows += [("", ""), ("إعدادات البوت وملف المخاطر المطبقة", ""), ("البوت", rk.get("bot")), ("ملف المخاطر", rk.get("profile")),
+                 ("أقصى صفقات مفتوحة", rk.get("max_open_positions")), ("أقصى صفقات يومياً", rk.get("max_trades_per_day")),
+                 ("وقف الخسارة إلزامي", "نعم" if rk.get("require_stop_loss") else "لا"), ("أقصى لوت للصفقة", rk.get("max_position_lots"))]
     rows += [("", ""), ("إعدادات الاستراتيجية المستخدمة", "")] + [(k, v) for k, v in meta.get("params", {}).items()]
     rows += [("", ""), ("افتراضات المحاكاة", ""),
              ("تنفيذ الإشارة", "عند افتتاح الشمعة التالية بعد إغلاق شمعة الإشارة"),

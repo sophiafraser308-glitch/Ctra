@@ -117,3 +117,15 @@ def test_stats_consistency():
     assert abs(s["net_profit"] - sum(t.net for t in r.trades)) < 1e-9
     assert abs(s["final_balance"] - r.trades[-1].balance_after) < 1e-9
     assert s["max_drawdown"] >= 0 and s["profit_factor"] is not None
+
+
+def test_risk_profile_gates_require_sl_and_max_trades_per_day():
+    e = engine(require_stop_loss=True, max_trades_per_day=2, max_open_positions=10)
+    nosl = {"side": "BUY", "order_type": "MARKET", "volume_lots": 1.0}
+    e.feed(*bar(0, 1.1, 1.1, 1.1, 1.1), [nosl])
+    e.feed(*bar(1, 1.1, 1.1, 1.1, 1.1), [])
+    assert e.open == [] and e.skipped[-1]["reason"].startswith("STOP_LOSS_REQUIRED")
+    for i in range(2, 6):
+        e.feed(*bar(i, 1.1, 1.1, 1.1, 1.1), [BUY])
+    e.feed(*bar(6, 1.1, 1.1, 1.1, 1.1), [])
+    assert len(e.open) == 2 and any(s["reason"].startswith("MAX_TRADES_PER_DAY") for s in e.skipped)

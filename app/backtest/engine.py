@@ -59,6 +59,8 @@ class BtConfig:
     sl_override: float = 0.0              # points; >0 replaces the strategy's stop loss
     tp_override: float = 0.0              # points; >0 replaces the strategy's take profit
     max_open_positions: int = 100
+    max_trades_per_day: int = 0           # 0 = unlimited (bot risk profile)
+    require_stop_loss: bool = False       # True: entries without a stop loss are rejected (bot risk profile)
     max_lots: float = 100.0
     daily_loss_limit: float = 0.0         # deposit currency, 0 = off (worst intrabar floating counts)
     daily_profit_target: float = 0.0      # deposit currency, 0 = off
@@ -144,6 +146,7 @@ class BacktestEngine:
         self._day = None
         self._day_realized = 0.0
         self._day_stopped = False
+        self._day_trades = 0
         self._tz_ms = int(cfg.tz_offset_hours * 3_600_000)
         self.signals_total = 0
         self._sym_ci = {k.upper(): k for k in specs}
@@ -158,7 +161,7 @@ class BacktestEngine:
     def _roll_day(self, ts: int) -> None:
         d = self.local_day(ts)
         if d != self._day:
-            self._day, self._day_realized, self._day_stopped = d, 0.0, False
+            self._day, self._day_realized, self._day_stopped, self._day_trades = d, 0.0, False, 0
 
     def _spread(self, spec: SymbolSpec) -> float:
         return spec.spread_pips * spec.pip_size
@@ -198,6 +201,10 @@ class BacktestEngine:
             return self._skip(ts, spec.name, p["side"], "MAX_OPEN_POSITIONS")
         sl_pips = self.cfg.sl_override or p.get("sl_pips") or None
         tp_pips = self.cfg.tp_override or p.get("tp_pips") or None
+        if self.cfg.require_stop_loss and not sl_pips:
+            return self._skip(ts, spec.name, p["side"], "STOP_LOSS_REQUIRED (risk profile)")
+        if self.cfg.max_trades_per_day and self._day_trades >= self.cfg.max_trades_per_day:
+            return self._skip(ts, spec.name, p["side"], "MAX_TRADES_PER_DAY (risk profile)")
         lots, why = self._size(spec, ts, p.get("lots"))
         if lots is None:
             return self._skip(ts, spec.name, p["side"], why)
@@ -208,6 +215,7 @@ class BacktestEngine:
         sl = round(entry - sgn * sl_pips * spec.pip_size, spec.digits) if sl_pips else None
         tp = round(entry + sgn * tp_pips * spec.pip_size, spec.digits) if tp_pips else None
         self._n += 1
+        self._day_trades += 1
         self.open.append(OpenPos(self._n, spec.name, p["side"], lots, ts, round(entry, spec.digits), sl, tp, sl_pips, tp_pips,
                                  p.get("comment") or "", p.get("signal_ts", 0), p.get("tag") or ""))
 

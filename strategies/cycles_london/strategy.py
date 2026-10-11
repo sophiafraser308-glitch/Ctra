@@ -8,6 +8,9 @@ RUN IT ON THE 1-MINUTE TIMEFRAME (M1). Two independent sub-strategies share the 
      * entry 1 at  cycle start + digit-sum(integer part of the open) minutes     (4150 -> 4+1+5+0 = 10 min)
      * entry 2 at  cycle start + (integer part of the open mod 100) minutes      (4150 -> 50 min)
      * at each entry bar CLOSE > level -> BUY, CLOSE < level -> SELL (CLOSE == level -> no trade)
+     * s1_mode "flip" (default): a second signal in the same direction simply opens a second trade (both stay open);
+       an opposite one first closes the earlier trade(s) of this cycle, then opens the new one.
+       s1_mode "independent" = the original indicator (opposite trades stay open side by side);
      * every S1 trade is closed on the last M1 bar of the cycle (unless TP/SL closed it earlier).
 
  S2  "London 5-minute breakout"
@@ -37,6 +40,7 @@ STRATEGY_INFO = {
         "s1_enabled": True,
         "s1_entry1_enabled": True,
         "s1_entry2_enabled": True,
+        "s1_mode": "flip",
         "s1_lots": 0.10,
         "s1_tp_points": 0.0,
         "s1_sl_points": 0.0,
@@ -141,6 +145,8 @@ class CyclesLondon(BaseStrategy):
             errs.append("s2_first_hour / s2_last_hour must be 0..23")
         if int(p["s2_first_hour"]) > int(p["s2_last_hour"]):
             errs.append("s2_first_hour must be <= s2_last_hour")
+        if p["s1_mode"] not in ("flip", "independent"):
+            errs.append("s1_mode must be flip or independent")
         if p["trade_direction"] not in ("both", "buy", "sell"):
             errs.append("trade_direction must be both, buy or sell")
         if p["lot_mode"] not in ("fixed", "risk"):
@@ -233,6 +239,7 @@ class CyclesLondon(BaseStrategy):
             st["m2"] = int(math.floor(o)) % 100
             st["d1"] = False
             st["d2"] = False
+            st["c_side"] = None
         if p["s1_enabled"] and st.get("c_known"):
             lvl = st["lvl"]
             for k in (1, 2):
@@ -248,6 +255,10 @@ class CyclesLondon(BaseStrategy):
                 side = "BUY" if c > lvl else "SELL"
                 if (direction == "buy" and side != "BUY") or (direction == "sell" and side != "SELL"):
                     continue
+                if p["s1_mode"] == "flip" and st.get("c_side") is not None and st["c_side"] != side:
+                    if live:                              # opposite direction: close the earlier trade(s), continue with the new one
+                        out.append(self.close(symbol, prefix + " flip", st["c_side"], "C"))
+                st["c_side"] = side
                 st["c_open"] = True
                 if live:
                     out.append(self._open(symbol, side, "s1", "%s E%d L%.1f +%dm" % (prefix, k, lvl, st["m" + str(k)]), "C"))

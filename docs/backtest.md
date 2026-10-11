@@ -29,3 +29,6 @@ Runs are stored in `backtest_runs` (config + brief summary).
 * Limits: ≈150,000 bars per timeframe (shorten the period / use a larger timeframe), 20-minute wall-clock cap, history depth = what the broker serves.
 
 > Not runtime-verified against a live cTrader account in the build environment; the engine, sandbox protocol and reports were verified offline with synthetic data (`tests/test_backtest_*.py`).
+
+## Using a bot's settings
+In the wizard, after choosing the strategy you can pick one of its bots (Step 1b). The test then runs with that bot's **pinned strategy version, parameters, symbols, timeframes and risk profile** (max open positions, max trades per day, stop-loss required, max lots per trade). Rejections caused by those limits appear in the Skipped sheet (`STOP_LOSS_REQUIRED`, `MAX_TRADES_PER_DAY`, `MAX_OPEN_POSITIONS`). "⚙️ Strategy params" still overrides single values for one run. Choosing "No bot" uses the strategy's active version and its default parameters.

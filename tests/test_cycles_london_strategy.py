@@ -84,8 +84,12 @@ def test_s1_entries_levels_and_cycle_end_close():
     out = drive(dict(S1_ONLY), bars)
     kinds = [(t, x["side"], x.get("tag")) for t, x in out]
     # the first (partial) cycle is unknown to a freshly started bot: it only gets one harmless CLOSE at its end, no entries
-    assert kinds == [(t0 - MIN, "CLOSE", "C"), (t0 + 10 * MIN, "BUY", "C"), (t0 + 50 * MIN, "SELL", "C"), (t0 + 239 * MIN, "CLOSE", "C")], kinds
-    out = out[1:]
+    assert kinds == [(t0 - MIN, "CLOSE", "C"), (t0 + 10 * MIN, "BUY", "C"), (t0 + 50 * MIN, "CLOSE", "C"), (t0 + 50 * MIN, "SELL", "C"),
+                     (t0 + 239 * MIN, "CLOSE", "C")], kinds
+    assert out[2][1]["close_side"] == "BUY"                              # flip closes only the first (BUY) trade
+    out = [out[1], out[3]]
+    ind = [(t, x["side"]) for t, x in drive(dict(S1_ONLY, s1_mode="independent"), bars)]
+    assert ind == [(t0 - MIN, "CLOSE"), (t0 + 10 * MIN, "BUY"), (t0 + 50 * MIN, "SELL"), (t0 + 239 * MIN, "CLOSE")], ind
     buy = out[0][1]
     assert buy["volume_lots"] == 0.10 and "L4150.3" in buy["comment"] and "+10m" in buy["comment"] and "stop_loss_pips" not in buy
     assert "E2" in out[1][1]["comment"] and "+50m" in out[1][1]["comment"]
@@ -109,12 +113,22 @@ def test_s1_tp_sl_lots_direction_and_flags():
     out = drive(dict(S1_ONLY, s1_tp_points=70.0, s1_sl_points=40.0, s1_lots=0.25), bars)
     e = [x for _, x in out if x["side"] != "CLOSE"]
     assert all(x["take_profit_pips"] == 70.0 and x["stop_loss_pips"] == 40.0 and x["volume_lots"] == 0.25 for x in e)
-    sell_only = [x["side"] for _, x in drive(dict(S1_ONLY, trade_direction="sell"), bars) if x["side"] != "CLOSE" or True][1:]
-    assert sell_only == ["SELL", "CLOSE"]
+    sell_only = [x["side"] for _, x in drive(dict(S1_ONLY, trade_direction="sell"), bars)][1:]
+    assert sell_only == ["SELL", "CLOSE"]                # BUY filtered by direction -> nothing to flip
     only_e1 = [x["side"] for _, x in drive(dict(S1_ONLY, s1_entry2_enabled=False), bars)][1:]
     assert only_e1 == ["BUY", "CLOSE"]
     risk = [x for _, x in drive(dict(S1_ONLY, lot_mode="risk"), bars) if x["side"] != "CLOSE"]
     assert risk and all("volume_lots" not in x for x in risk)
+
+
+def test_s1_same_direction_second_signal_opens_both():
+    t0 = ms(2026, 3, 2, 0, 0)
+    bars = flat(t0 - 30 * MIN, 30, 4100.0) + cycle_bars(t0)
+    bars[30 + 50] = dict(bars[30 + 50], c=4152.0, h=4152.0)               # E2 also above the level -> same direction
+    out = [(t, x["side"]) for t, x in drive(dict(S1_ONLY), bars)][1:]
+    assert out == [(t0 + 10 * MIN, "BUY"), (t0 + 50 * MIN, "BUY"), (t0 + 239 * MIN, "CLOSE")], out
+    ind = [x["side"] for _, x in drive(dict(S1_ONLY, s1_mode="independent"), bars)][1:]
+    assert ind == ["BUY", "BUY", "CLOSE"]
 
 
 def test_s1_restart_midcycle_replays_silently():
@@ -130,7 +144,7 @@ def test_s1_restart_midcycle_replays_silently():
     for i in range(i0 + 1, len(bars)):
         for x in s.on_bar("XAUUSD", "M1", bars[i], bars[max(0, i - 200):i]) or []:
             out.append((bars[i]["t"], x["side"]))
-    assert out == [(t0 + 50 * MIN, "SELL"), (t0 + 239 * MIN, "CLOSE")], out
+    assert out == [(t0 + 50 * MIN, "CLOSE"), (t0 + 50 * MIN, "SELL"), (t0 + 239 * MIN, "CLOSE")], out
 
 
 def test_s1_unknown_cycle_start_skips_entries_but_still_closes():
@@ -272,6 +286,7 @@ def test_invalid_params_rejected():
     assert "cycle_clock" in bad(cycle_clock="mars")
     assert "s2_first_hour" in bad(s2_first_hour=20, s2_last_hour=3)
     assert "trade_direction" in bad(trade_direction="x")
+    assert "s1_mode" in bad(s1_mode="x")
     assert "s1_lots" in bad(s1_lots=0)
     assert "s2_tp_points" in bad(s2_tp_points=-1)
     s = mod.CyclesLondon(dict(PARAMS), {"timeframes": ["M15"]})
