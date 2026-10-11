@@ -58,8 +58,6 @@ class BtConfig:
     default_lots: float = 0.10            # used when neither the override nor the strategy gives a size
     sl_override: float = 0.0              # points; >0 replaces the strategy's stop loss
     tp_override: float = 0.0              # points; >0 replaces the strategy's take profit
-    sl_forced: bool = False               # True: sl_override is final even when 0 (= no stop loss); the strategy's value is ignored
-    tp_forced: bool = False               # same for take profit
     max_open_positions: int = 100
     max_lots: float = 100.0
     daily_loss_limit: float = 0.0         # deposit currency, 0 = off (worst intrabar floating counts)
@@ -83,6 +81,7 @@ class OpenPos:
     tp_pips: float | None
     comment: str = ""
     signal_bar_ts: int = 0
+    tag: str = ""
     mae_pips: float = 0.0
     mfe_pips: float = 0.0
     bars: int = 0
@@ -197,8 +196,8 @@ class BacktestEngine:
             return self._skip(ts, spec.name, p["side"], "DAY_STOPPED (daily limit reached)")
         if len(self.open) >= self.cfg.max_open_positions:
             return self._skip(ts, spec.name, p["side"], "MAX_OPEN_POSITIONS")
-        sl_pips = (self.cfg.sl_override or None) if self.cfg.sl_forced else (self.cfg.sl_override or p.get("sl_pips") or None)
-        tp_pips = (self.cfg.tp_override or None) if self.cfg.tp_forced else (self.cfg.tp_override or p.get("tp_pips") or None)
+        sl_pips = self.cfg.sl_override or p.get("sl_pips") or None
+        tp_pips = self.cfg.tp_override or p.get("tp_pips") or None
         lots, why = self._size(spec, ts, p.get("lots"))
         if lots is None:
             return self._skip(ts, spec.name, p["side"], why)
@@ -210,7 +209,7 @@ class BacktestEngine:
         tp = round(entry + sgn * tp_pips * spec.pip_size, spec.digits) if tp_pips else None
         self._n += 1
         self.open.append(OpenPos(self._n, spec.name, p["side"], lots, ts, round(entry, spec.digits), sl, tp, sl_pips, tp_pips,
-                                 p.get("comment") or "", p.get("signal_ts", 0)))
+                                 p.get("comment") or "", p.get("signal_ts", 0), p.get("tag") or ""))
 
     def _close(self, pos: OpenPos, ts: int, price: float, reason: str) -> None:
         spec = self.specs[pos.symbol]
@@ -228,7 +227,8 @@ class BacktestEngine:
     def _exec_pending(self, ts: int, spec: SymbolSpec, bar: dict, p: dict[str, Any]) -> None:
         if p["kind"] == "CLOSE":
             spread = self._spread(spec)
-            for pos in [x for x in self.open if x.symbol == spec.name and (p["side"] is None or x.side == p["side"])]:
+            for pos in [x for x in self.open if x.symbol == spec.name and (p["side"] is None or x.side == p["side"])
+                        and (p.get("tag") is None or x.tag == p["tag"])]:
                 self._close(pos, ts, bar["o"] if pos.side == "BUY" else bar["o"] + spread, "SIGNAL_CLOSE")
         else:
             self._open(ts, spec, bar, p)
@@ -309,14 +309,14 @@ class BacktestEngine:
             side = s.get("side")
             target = self._sym_ci.get(str(s.get("symbol", "")).upper(), symbol)     # strategies may signal another configured symbol
             if side == "CLOSE":
-                self.pending.setdefault(target, []).append({"kind": "CLOSE", "side": s.get("close_side")})
+                self.pending.setdefault(target, []).append({"kind": "CLOSE", "side": s.get("close_side"), "tag": s.get("tag")})
             elif side in ("BUY", "SELL"):
                 if s.get("order_type", "MARKET") != "MARKET":
                     self._skip(ts, target, side, "PENDING_ORDERS_NOT_SUPPORTED_IN_BACKTEST")
                     continue
                 self.pending.setdefault(target, []).append({"kind": "OPEN", "side": side, "sl_pips": s.get("stop_loss_pips"),
                                                             "tp_pips": s.get("take_profit_pips"), "lots": s.get("volume_lots"),
-                                                            "comment": s.get("comment"), "signal_ts": ts + self.cfg.tf_ms})
+                                                            "comment": s.get("comment"), "tag": s.get("tag"), "signal_ts": ts + self.cfg.tf_ms})
 
     def finish(self) -> BtResult:
         warnings: list[str] = []

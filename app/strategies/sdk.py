@@ -40,26 +40,27 @@ class BaseStrategy:
     @staticmethod
     def buy(symbol: str, stop_loss_pips: float | None = None, take_profit_pips: float | None = None,
             comment: str | None = None, order_type: str = "MARKET", price: float | None = None,
-            volume_lots: float | None = None) -> dict:
-        """volume_lots=None -> the Risk Engine sizes the trade from risk-per-trade; a number -> fixed lots (still capped by risk limits)."""
-        return _signal(symbol, "BUY", stop_loss_pips, take_profit_pips, comment, order_type, price, volume_lots)
+            volume_lots: float | None = None, tag: str | None = None) -> dict:
+        """volume_lots=None -> the Risk Engine sizes the trade from risk-per-trade; a number -> fixed lots (still capped by risk limits).
+        tag (<=16 chars, letters/digits/_) labels the trade so close(..., tag=...) closes only trades with the same tag."""
+        return _signal(symbol, "BUY", stop_loss_pips, take_profit_pips, comment, order_type, price, volume_lots, tag)
 
     @staticmethod
     def sell(symbol: str, stop_loss_pips: float | None = None, take_profit_pips: float | None = None,
              comment: str | None = None, order_type: str = "MARKET", price: float | None = None,
-             volume_lots: float | None = None) -> dict:
-        return _signal(symbol, "SELL", stop_loss_pips, take_profit_pips, comment, order_type, price, volume_lots)
+             volume_lots: float | None = None, tag: str | None = None) -> dict:
+        return _signal(symbol, "SELL", stop_loss_pips, take_profit_pips, comment, order_type, price, volume_lots, tag)
 
     @staticmethod
-    def close(symbol: str, comment: str | None = None, side: str | None = None) -> dict:
-        """Close this bot's positions on `symbol`; side='BUY'/'SELL' closes only that direction."""
-        d = _signal(symbol, "CLOSE", None, None, comment, "MARKET", None, None)
+    def close(symbol: str, comment: str | None = None, side: str | None = None, tag: str | None = None) -> dict:
+        """Close this bot's positions on `symbol`; side='BUY'/'SELL' closes only that direction; tag closes only trades opened with that tag."""
+        d = _signal(symbol, "CLOSE", None, None, comment, "MARKET", None, None, tag)
         if side:
             d["close_side"] = side
         return d
 
 
-def _signal(symbol, side, sl, tp, comment, order_type, price, volume_lots=None) -> dict:
+def _signal(symbol, side, sl, tp, comment, order_type, price, volume_lots=None, tag=None) -> dict:
     d: dict[str, Any] = {"symbol": symbol, "side": side, "order_type": order_type}
     if volume_lots is not None:
         d["volume_lots"] = float(volume_lots)
@@ -71,6 +72,8 @@ def _signal(symbol, side, sl, tp, comment, order_type, price, volume_lots=None) 
         d["comment"] = str(comment)[:64]
     if price is not None:
         d["price"] = float(price)
+    if tag:
+        d["tag"] = str(tag)[:16]
     return d
 
 

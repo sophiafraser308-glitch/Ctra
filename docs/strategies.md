@@ -34,3 +34,8 @@ All cTrader periods are supported: M1 M2 M3 M4 M5 M10 M15 M30 H1 H4 H12 D1 W1 MN
 
 ## Units
 `stop_loss_pips` / `take_profit_pips` and every spread value are in **points** as defined in `instruments.md` (gold: 1 point = 0.1; forex: 1 pip).
+
+## Cycles London (`strategies/cycles_london/strategy.py`)
+M1 port of the TradingView indicator "4H Cycles + London 5m Breakout". Full guide: `strategies/cycles_london/README.md`.
+
+Trade tags: signals may carry `tag` (≤16 chars, letters/digits/_). `self.close(symbol, comment, side, tag)` closes only open trades whose entry had the same tag (live: via the order's stored tag; backtest: via the position). A CLOSE without `tag` still closes everything, so older strategies behave as before. `self.buy/sell(..., volume_lots, tag)` set the tag.

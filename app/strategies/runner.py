@@ -91,7 +91,7 @@ def _normalize(result):
     for s in list(result)[:20]:
         if not isinstance(s, dict):
             raise TypeError("each signal must be a dict")
-        out.append({k: s[k] for k in ("symbol", "side", "order_type", "price", "stop_loss_pips", "take_profit_pips", "confidence", "comment", "volume_lots", "close_side") if k in s})
+        out.append({k: s[k] for k in ("symbol", "side", "order_type", "price", "stop_loss_pips", "take_profit_pips", "confidence", "comment", "volume_lots", "close_side", "tag") if k in s})
     return out
 
 
